@@ -27,7 +27,7 @@ export default function CameraScreen() {
   const takePicture = useCallback(async () => {
     if (!cameraRef.current || !permission?.granted) return;
     try {
-      const photo = await cameraRef.current.takePictureAsync({ base64: false });
+      const photo = await cameraRef.current.takePictureAsync({ base64: false, quality: 0.5 });
       if (photo?.uri) {
         setCapturedUri(photo.uri);
         setPreviewMode(true);

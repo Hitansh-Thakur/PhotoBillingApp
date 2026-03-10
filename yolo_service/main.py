@@ -11,7 +11,11 @@ model = YOLO("best.pt")   # loaded once at startup
 async def detect(file: UploadFile = File(...)):
     img_bytes = await file.read()
     img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-    results = model(img)
+
+    # Resize to 640px max side — YOLO's native resolution, much faster on CPU
+    img.thumbnail((640, 640), Image.LANCZOS)
+
+    results = model(img, imgsz=640)
 
     detections = []
     for r in results:
