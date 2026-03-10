@@ -43,4 +43,9 @@ app-example
 /android
 
 # backend uploads
+backend/node_modules
 backend/uploads/
+yolo_service/yolo/
+yolo_service/__pycache__
+
+.agents/

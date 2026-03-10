@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { uploadImage } from '@/backend/src/utils/api';
+import { detectProductsFromImage } from '@/backend/src/utils/api';
 import { ThemedText } from '@/components/themed-text';
 import { useAppData } from '@/context/AppDataContext';
 import { getMockDetectedProducts } from '@/data/mockData';
@@ -45,27 +45,24 @@ export default function CameraScreen() {
 
   const [uploading, setUploading] = useState(false);
   const confirmImage = useCallback(async () => {
-    const mockItems = getMockDetectedProducts(inventory);
-    setPendingBillItems(mockItems);
-    if (capturedUri) {
-      setUploading(true);
-      try {
-        const { path } = await uploadImage(capturedUri);
-        setPendingImagePath(path);
-      } catch (e) {
-        const message = e && typeof e === 'object' && 'message' in e
-          ? String((e as { message: string }).message)
-          : 'Failed to upload image';
-        Alert.alert('Upload failed', message);
-        setUploading(false);
-        return;
-      }
+    if (!capturedUri) return;
+    setUploading(true);
+    try {
+      // Single call: upload image AND run YOLO detection
+      const { detected, path } = await detectProductsFromImage(capturedUri);
+      setPendingBillItems(detected);
+      setPendingImagePath(path ?? null);
+    } catch (e) {
+      const message = e && typeof e === 'object' && 'message' in e
+        ? String((e as { message: string }).message)
+        : 'Detection failed';
+      Alert.alert('Detection failed', message);
       setUploading(false);
-    } else {
-      setPendingImagePath(null);
+      return;
     }
+    setUploading(false);
     router.replace('/bill-edit' as const);
-  }, [inventory, setPendingBillItems, setPendingImagePath, router, capturedUri]);
+  }, [capturedUri, setPendingBillItems, setPendingImagePath, router]);
 
   const retake = useCallback(() => {
     setCapturedUri(null);
