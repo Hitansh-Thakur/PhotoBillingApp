@@ -1,0 +1,49 @@
+# Database Migration Instructions
+
+## Migration Required
+
+To complete the store name storage feature, you need to run a database migration to add the `business_name` column to the `users` table.
+
+## Option 1: Using MySQL Workbench (Recommended)
+
+1. Open **MySQL Workbench**
+2. Connect to your `photo_billing` database
+3. Open the migration file: [001_add_business_name.sql](file:///d:/Project/backend/database/migrations/001_add_business_name.sql)
+4. Execute the SQL script
+5. Verify the column was added by checking the output
+
+## Option 2: Using Command Line
+
+If you have MySQL command line tools installed:
+
+```bash
+# Navigate to the backend directory
+cd d:\Project\backend
+
+# Run the migration
+mysql -u root -p photo_billing < database/migrations/001_add_business_name.sql
+```
+
+## Option 3: Manual SQL Execution
+
+Run this SQL command in your MySQL client:
+
+```sql
+USE photo_billing;
+ALTER TABLE users ADD COLUMN business_name VARCHAR(255) NULL AFTER name;
+DESCRIBE users;
+```
+
+## Verification
+
+After running the migration, verify the column exists:
+
+```sql
+SELECT user_id, name, business_name, email FROM users LIMIT 5;
+```
+
+You should see the `business_name` column in the results.
+
+## What's Next
+
+Once the migration is complete, the registration flow will automatically start storing the business/store name in the database!

@@ -1,0 +1,143 @@
+# Cashflow Expense Management Implementation Plan
+
+This plan adds full CRUD (Create, Read, Update, Delete) functionality for expenses in the Cashflow tab, allowing users to manage their expenses directly from the UI.
+
+## User Review Required
+
+> [!IMPORTANT]
+> **UI Design Choice**: The implementation will add a floating action button (FAB) for "Add Expense" and inline edit/delete buttons for each expense entry. Would you prefer a different UI pattern (e.g., swipe actions, long-press menu)?
+
+> [!IMPORTANT]
+> **Expense vs Income**: Currently, the plan focuses on expense management. Should users also be able to add/edit income entries manually, or should income only come from bills?
+
+## Proposed Changes
+
+### Backend - API Endpoints
+
+#### [MODIFY] [cashflowRoutes.js](file:///d:/Project/backend/src/routes/cashflowRoutes.js)
+
+Add two new endpoints for updating and deleting cashflow entries:
+
+- **PUT /api/cashflow/:id** - Update an existing cashflow entry
+  - Validates entry_id parameter
+  - Validates type, amount, description, date in request body
+  - Returns updated entry or 404 if not found
+
+- **DELETE /api/cashflow/:id** - Delete a cashflow entry
+  - Validates entry_id parameter
+  - Returns success message or 404 if not found
+  - Only allows deletion of manual entries (not auto-generated from bills)
+
+---
+
+### Backend - Service Layer
+
+#### [MODIFY] [cashflowService.js](file:///d:/Project/backend/src/services/cashflowService.js)
+
+Add service methods to support update and delete operations:
+
+- `updateCashflowEntry(entryId, { type, amount, description, date })` - Updates an existing entry
+- `deleteCashflowEntry(entryId)` - Deletes an entry (with validation to prevent deleting bill-linked entries)
+- `getCashflowEntryById(entryId)` - Helper to fetch a single entry for validation
+
+---
+
+### Frontend - Components
+
+#### [NEW] [ExpenseFormModal.tsx](file:///d:/Project/components/ExpenseFormModal.tsx)
+
+Create a reusable modal component for adding/editing expenses:
+
+- Form fields: amount (number), description (text), date (date picker), type (income/expense toggle)
+- Validation: amount must be positive, date cannot be in future
+- Two modes: "add" and "edit"
+- Callbacks: onSubmit, onCancel
+- Styled with themed components for dark/light mode support
+
+---
+
+### Frontend - Cashflow Screen
+
+#### [MODIFY] [cashflow.tsx](file:///d:/Project/app/(tabs)/cashflow.tsx)
+
+Enhance the Cashflow screen with expense management UI:
+
+1. **Add Floating Action Button (FAB)**
+   - Positioned at bottom-right
+   - Opens ExpenseFormModal in "add" mode
+   - Icon: "+" or "add" icon
+
+2. **Update Entry List Display**
+   - Show description for each entry
+   - Add edit and delete buttons for each manual entry
+   - Disable edit/delete for bill-linked entries (show "From Bill" badge)
+   - Add confirmation dialog for delete action
+
+3. **Add API Integration**
+   - [addExpense(data)](file:///d:/Project/backend/src/services/cashflowService.js#50-58) - POST to /api/cashflow
+   - `updateExpense(id, data)` - PUT to /api/cashflow/:id
+   - `deleteExpense(id)` - DELETE to /api/cashflow/:id
+   - Refresh cashflow data after successful operations
+
+4. **State Management**
+   - Add modal visibility state
+   - Add selected entry state for editing
+   - Add loading states for operations
+   - Handle errors with user-friendly alerts
+
+## Verification Plan
+
+### Automated Tests
+
+Since this is a React Native app, verification will be done through manual testing and browser-based testing:
+
+```bash
+# Ensure backend is running
+cd backend
+npm run dev
+
+# Ensure frontend is running
+cd ..
+npm start
+```
+
+### Manual Verification
+
+1. **Add Expense Flow**
+   - Navigate to Cashflow tab
+   - Click FAB button
+   - Fill in expense details (amount, description, date)
+   - Submit form
+   - Verify expense appears in list
+   - Verify summary totals update correctly
+   - Check database to confirm entry was created
+
+2. **Update Expense Flow**
+   - Click edit button on an expense entry
+   - Modify amount and description
+   - Submit changes
+   - Verify entry updates in list
+   - Verify summary totals recalculate
+   - Check database to confirm update
+
+3. **Delete Expense Flow**
+   - Click delete button on an expense entry
+   - Confirm deletion in dialog
+   - Verify entry disappears from list
+   - Verify summary totals update
+   - Check database to confirm deletion
+
+4. **Edge Cases**
+   - Try to edit/delete a bill-linked entry (should be disabled/hidden)
+   - Try to add expense with invalid amount (negative, zero)
+   - Try to add expense with future date
+   - Test with no network connection (error handling)
+   - Test with very large amounts
+   - Test with special characters in description
+
+5. **UI/UX Verification**
+   - Verify dark/light mode theming
+   - Verify responsive layout on different screen sizes
+   - Verify loading indicators during API calls
+   - Verify error messages are user-friendly
+   - Verify form validation feedback
