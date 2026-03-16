@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as Print from 'expo-print';
 
 import { api } from '@/backend/src/utils/api';
 import { ExpenseFormModal } from '@/components/ExpenseFormModal';
@@ -26,6 +37,21 @@ interface CashflowEntry {
   bill_id: number | null;
 }
 
+interface BillItem {
+  bill_item_id: number;
+  product_id: number;
+  name: string;
+  quantity: number;
+  price: number;
+}
+
+interface BillDetails {
+  bill_id: number;
+  date: string;
+  total_amount: number;
+  items: BillItem[];
+}
+
 export default function CashflowScreen() {
   const { loading: appLoading } = useAppData();
   const [summary, setSummary] = useState<CashflowSummary | null>(null);
@@ -37,6 +63,11 @@ export default function CashflowScreen() {
   const [operationLoading, setOperationLoading] = useState(false);
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+
+  // Bill details modal state
+  const [billModalVisible, setBillModalVisible] = useState(false);
+  const [selectedBill, setSelectedBill] = useState<BillDetails | null>(null);
+  const [billLoading, setBillLoading] = useState(false);
 
   const fetchCashflow = useCallback(async () => {
     setLoading(true);
@@ -59,6 +90,122 @@ export default function CashflowScreen() {
   useEffect(() => {
     fetchCashflow();
   }, [fetchCashflow]);
+
+  // Open bill details when user taps a "From Bill" entry
+  const handleViewBill = useCallback(async (billId: number) => {
+    setBillLoading(true);
+    setBillModalVisible(true);
+    setSelectedBill(null);
+    try {
+      // Fetch bill items
+      const items = await api.get<BillItem[]>(`/api/bills/${billId}/items`);
+      const total = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+      setSelectedBill({
+        bill_id: billId,
+        date: new Date().toLocaleDateString(),
+        total_amount: total,
+        items,
+      });
+    } catch (e) {
+      const message = e && typeof e === 'object' && 'message' in e
+        ? String((e as { message: unknown }).message)
+        : 'Failed to load bill details';
+      Alert.alert('Error', message);
+      setBillModalVisible(false);
+    } finally {
+      setBillLoading(false);
+    }
+  }, []);
+
+  // Print / Share bill
+  const handlePrintBill = useCallback(async (bill: BillDetails) => {
+    const header = `===== BILL #${bill.bill_id} =====\n`;
+    const divider = '─'.repeat(36) + '\n';
+    const colHeader = `${'Product'.padEnd(16)}${'Qty'.padStart(4)}${'Price'.padStart(8)}${'Total'.padStart(8)}\n`;
+    const rows = bill.items
+      .map(
+        (i) =>
+          `${i.name.substring(0, 15).padEnd(16)}${String(i.quantity).padStart(4)}${('₹' + i.price.toFixed(2)).padStart(8)}${('₹' + (i.price * i.quantity).toFixed(2)).padStart(8)}`
+      )
+      .join('\n');
+    const totalLine = `\n${'TOTAL'.padEnd(28)}${('₹' + bill.total_amount.toFixed(2)).padStart(8)}`;
+    const billText = header + divider + colHeader + divider + rows + '\n' + divider + totalLine + '\n' + divider;
+
+    const htmlContent = `
+      <html>
+        <head>
+          <title>Bill #${bill.bill_id}</title>
+          <style>
+            body { font-family: sans-serif; padding: 32px; max-width: 480px; margin: 0 auto; }
+            h2 { text-align: center; margin-bottom: 4px; }
+            p.subtitle { text-align: center; color: #666; margin-top: 0; }
+            table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+            th, td { padding: 10px 8px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+            th { font-weight: bold; background: #f9fafb; font-size: 13px; color: #374151; }
+            .right { text-align: right; }
+            .total-row td { font-weight: bold; font-size: 1.05em; border-top: 2px solid #d1d5db; border-bottom: none; }
+            @media print { button { display: none; } }
+          </style>
+        </head>
+        <body>
+          <h2>Bill #${bill.bill_id}</h2>
+          <p class="subtitle">Customer Bill</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th class="right">Qty</th>
+                <th class="right">Price</th>
+                <th class="right">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${bill.items
+                .map(
+                  (i) =>
+                    `<tr>
+                    <td>${i.name}</td>
+                    <td class="right">${i.quantity}</td>
+                    <td class="right">&#8377;${i.price.toFixed(2)}</td>
+                    <td class="right">&#8377;${(i.price * i.quantity).toFixed(2)}</td>
+                    </tr>`
+                )
+                .join('')}
+              <tr class="total-row">
+                <td colspan="3">Total</td>
+                <td class="right">&#8377;${bill.total_amount.toFixed(2)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+
+    if (Platform.OS === 'web') {
+      const win = window.open('', '_blank');
+      if (win) {
+        win.document.write(htmlContent);
+        win.document.close();
+        win.print();
+      }
+    } else {
+      // Native: use expo-print for a proper print dialog
+      try {
+        await Print.printAsync({ html: htmlContent });
+      } catch (e) {
+        // If print fails (e.g. user cancels), fall back to Share
+        try {
+          const text = `Bill #${bill.bill_id}\n` +
+            bill.items.map((i) => `${i.name} x${i.quantity} @ ₹${i.price.toFixed(2)} = ₹${(i.price * i.quantity).toFixed(2)}`).join('\n') +
+            `\nTotal: ₹${bill.total_amount.toFixed(2)}`;
+          await Share.share({ message: text, title: `Bill #${bill.bill_id}` });
+        } catch {
+          Alert.alert('Print failed', 'Could not print the bill.');
+        }
+      }
+    }
+  }, []);
+
 
   const handleAddEntry = () => {
     setEditingEntry(null);
@@ -108,11 +255,9 @@ export default function CashflowScreen() {
     setOperationLoading(true);
     try {
       if (editingEntry) {
-        // Update existing entry
         await api.put(`/api/cashflow/${editingEntry.entry_id}`, data);
         Alert.alert('Success', 'Entry updated successfully');
       } else {
-        // Add new entry
         await api.post('/api/cashflow', data);
         Alert.alert('Success', 'Entry added successfully');
       }
@@ -216,9 +361,13 @@ export default function CashflowScreen() {
                   <View style={styles.entryHeader}>
                     <ThemedText style={styles.entryDate}>{e.date}</ThemedText>
                     {e.bill_id && (
-                      <View style={styles.billBadge}>
-                        <ThemedText style={styles.billBadgeText}>From Bill</ThemedText>
-                      </View>
+                      /* Tappable "From Bill" badge - opens bill details */
+                      <Pressable
+                        style={styles.billBadge}
+                        onPress={() => handleViewBill(e.bill_id!)}
+                      >
+                        <ThemedText style={styles.billBadgeText}>📄 View Bill</ThemedText>
+                      </Pressable>
                     )}
                   </View>
                   {e.description && (
@@ -280,6 +429,92 @@ export default function CashflowScreen() {
         }}
       />
 
+      {/* Bill Details Modal */}
+      <Modal visible={billModalVisible} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <ThemedView style={styles.billModal}>
+            <View style={styles.billModalHeader}>
+              <ThemedText type="subtitle">
+                {selectedBill ? `Bill #${selectedBill.bill_id}` : 'Bill Details'}
+              </ThemedText>
+              <Pressable onPress={() => setBillModalVisible(false)} style={styles.closeBtn}>
+                <ThemedText style={styles.closeBtnText}>✕</ThemedText>
+              </Pressable>
+            </View>
+
+            {billLoading ? (
+              <View style={styles.billLoading}>
+                <ActivityIndicator size="large" color={colors.tint} />
+                <ThemedText style={{ opacity: 0.7, marginTop: 8 }}>Loading bill…</ThemedText>
+              </View>
+            ) : selectedBill ? (
+              <>
+                <ScrollView style={styles.billScroll} showsVerticalScrollIndicator={false}>
+                  {/* Table header */}
+                  <View style={[styles.tableRow, styles.tableHeader]}>
+                    <ThemedText style={[styles.tableCell, styles.cellProduct, styles.headerText]}>
+                      Product
+                    </ThemedText>
+                    <ThemedText style={[styles.tableCell, styles.cellNum, styles.headerText]}>
+                      Qty
+                    </ThemedText>
+                    <ThemedText style={[styles.tableCell, styles.cellNum, styles.headerText]}>
+                      Price
+                    </ThemedText>
+                    <ThemedText style={[styles.tableCell, styles.cellNum, styles.headerText]}>
+                      Total
+                    </ThemedText>
+                  </View>
+
+                  {/* Table rows */}
+                  {selectedBill.items.map((item, idx) => (
+                    <View
+                      key={item.bill_item_id}
+                      style={[styles.tableRow, idx % 2 === 0 ? styles.tableRowEven : styles.tableRowOdd]}
+                    >
+                      <ThemedText style={[styles.tableCell, styles.cellProduct]} numberOfLines={2}>
+                        {item.name}
+                      </ThemedText>
+                      <ThemedText style={[styles.tableCell, styles.cellNum]}>
+                        {item.quantity}
+                      </ThemedText>
+                      <ThemedText style={[styles.tableCell, styles.cellNum]}>
+                        ₹{item.price.toFixed(2)}
+                      </ThemedText>
+                      <ThemedText style={[styles.tableCell, styles.cellNum]}>
+                        ₹{(item.price * item.quantity).toFixed(2)}
+                      </ThemedText>
+                    </View>
+                  ))}
+
+                  {/* Total row */}
+                  <View style={[styles.tableRow, styles.totalRow]}>
+                    <ThemedText style={[styles.tableCell, styles.cellProduct, styles.totalText]}>
+                      TOTAL
+                    </ThemedText>
+                    <ThemedText style={[styles.tableCell, styles.cellNum]}></ThemedText>
+                    <ThemedText style={[styles.tableCell, styles.cellNum]}></ThemedText>
+                    <ThemedText style={[styles.tableCell, styles.cellNum, styles.totalText]}>
+                      ₹{selectedBill.total_amount.toFixed(2)}
+                    </ThemedText>
+                  </View>
+                </ScrollView>
+
+                {/* Print / Share button */}
+                <Pressable
+                  style={[styles.printBtn, { backgroundColor: colors.tint }]}
+                  onPress={() => handlePrintBill(selectedBill)}
+                >
+                  <ThemedText style={styles.printBtnText}>
+                    {Platform.OS === 'web' ? '🖨️ Print Bill' : '📤 Share Bill'}
+                  </ThemedText>
+                </Pressable>
+              </>
+            ) : null}
+          </ThemedView>
+        </View>
+      </Modal>
+
       {/* Loading Overlay */}
       {operationLoading && (
         <View style={styles.loadingOverlay}>
@@ -299,7 +534,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 24,
-    paddingBottom: 100, // Extra padding for FAB
+    paddingBottom: 100,
   },
   title: {
     marginBottom: 4,
@@ -333,20 +568,10 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
   },
-  cardHint: {
-    fontSize: 10,
-    opacity: 0.5,
-    marginTop: 2,
-  },
   chartSection: {
     padding: 16,
     borderRadius: 12,
     backgroundColor: 'rgba(128,128,128,0.08)',
-  },
-  chartHint: {
-    fontSize: 12,
-    opacity: 0.6,
-    marginBottom: 16,
   },
   chartPlaceholder: {
     flexDirection: 'row',
@@ -436,14 +661,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   billBadge: {
-    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+    backgroundColor: 'rgba(59, 130, 246, 0.15)',
     paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(59,130,246,0.3)',
   },
   billBadgeText: {
     color: '#3b82f6',
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '600',
   },
   entryActions: {
@@ -497,5 +724,89 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  // Bill details modal
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  billModal: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    paddingBottom: 40,
+    maxHeight: '85%',
+  },
+  billModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  closeBtn: {
+    padding: 4,
+  },
+  closeBtnText: {
+    fontSize: 18,
+    opacity: 0.7,
+  },
+  billLoading: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  billScroll: {
+    maxHeight: 320,
+  },
+  tableRow: {
+    flexDirection: 'row',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(128,128,128,0.12)',
+  },
+  tableHeader: {
+    borderBottomWidth: 2,
+    borderBottomColor: 'rgba(128,128,128,0.25)',
+  },
+  tableRowEven: {
+    backgroundColor: 'rgba(128,128,128,0.04)',
+  },
+  tableRowOdd: {
+    backgroundColor: 'transparent',
+  },
+  tableCell: {
+    fontSize: 13,
+  },
+  cellProduct: {
+    flex: 2,
+    paddingRight: 4,
+  },
+  cellNum: {
+    flex: 1,
+    textAlign: 'right',
+  },
+  headerText: {
+    fontWeight: '700',
+    fontSize: 12,
+    opacity: 0.7,
+  },
+  totalRow: {
+    borderTopWidth: 2,
+    borderTopColor: 'rgba(128,128,128,0.3)',
+    borderBottomWidth: 0,
+    marginTop: 4,
+  },
+  totalText: {
+    fontWeight: '700',
+  },
+  printBtn: {
+    marginTop: 20,
+    padding: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  printBtnText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
 });
-

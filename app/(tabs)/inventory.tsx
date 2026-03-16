@@ -17,14 +17,18 @@ import { useAppData } from '@/context/AppDataContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import type { Product } from '@/types';
 
+const LOW_STOCK_THRESHOLD = 5;
+
 export default function InventoryScreen() {
   const { inventory, updateInventory, addProduct, loading } = useAppData();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editQty, setEditQty] = useState('');
   const [editPrice, setEditPrice] = useState('');
+  const [editBuyingPrice, setEditBuyingPrice] = useState('');
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [newName, setNewName] = useState('');
   const [newPrice, setNewPrice] = useState('');
+  const [newBuyingPrice, setNewBuyingPrice] = useState('');
   const [newQty, setNewQty] = useState('');
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
@@ -33,6 +37,7 @@ export default function InventoryScreen() {
     setEditingId(p.id);
     setEditQty(String(p.quantity));
     setEditPrice(String(p.price));
+    setEditBuyingPrice(String(p.buyingPrice ?? 0));
   };
 
   const [saving, setSaving] = useState(false);
@@ -40,9 +45,10 @@ export default function InventoryScreen() {
     if (!editingId) return;
     const qty = Math.max(0, parseInt(editQty, 10) || 0);
     const price = Math.max(0, parseFloat(editPrice) || 0);
+    const buyingPrice = Math.max(0, parseFloat(editBuyingPrice) || 0);
     setSaving(true);
     try {
-      await updateInventory(editingId, { quantity: qty, price });
+      await updateInventory(editingId, { quantity: qty, price, buyingPrice });
       setEditingId(null);
     } catch (err: unknown) {
       const message = err && typeof err === 'object' && 'message' in err
@@ -58,13 +64,15 @@ export default function InventoryScreen() {
   const handleAddProduct = async () => {
     const name = newName.trim();
     const price = Math.max(0, parseFloat(newPrice) || 0);
+    const buyingPrice = Math.max(0, parseFloat(newBuyingPrice) || 0);
     const quantity = Math.max(0, parseInt(newQty, 10) || 0);
     if (!name) return;
     setAdding(true);
     try {
-      await addProduct({ name, price, quantity });
+      await addProduct({ name, price, buyingPrice, quantity });
       setNewName('');
       setNewPrice('');
+      setNewBuyingPrice('');
       setNewQty('');
       setAddModalVisible(false);
     } catch (err: unknown) {
@@ -85,6 +93,8 @@ export default function InventoryScreen() {
     );
   }
 
+  const lowStockItems = inventory.filter(p => p.quantity < LOW_STOCK_THRESHOLD);
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -100,9 +110,17 @@ export default function InventoryScreen() {
         </TouchableOpacity>
       </View>
 
+      {lowStockItems.length > 0 && (
+        <View style={styles.lowStockBanner}>
+          <ThemedText style={styles.lowStockText}>
+            ⚠️ Low stock: {lowStockItems.map(p => p.name).join(', ')}
+          </ThemedText>
+        </View>
+      )}
+
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
         {inventory.map((p) => (
-          <View key={p.id} style={styles.card}>
+          <View key={p.id} style={[styles.card, p.quantity < LOW_STOCK_THRESHOLD && styles.cardLowStock]}>
             {editingId === p.id ? (
               <>
                 <ThemedText type="defaultSemiBold">{p.name}</ThemedText>
@@ -117,11 +135,20 @@ export default function InventoryScreen() {
                     />
                   </View>
                   <View style={styles.inputGroup}>
-                    <ThemedText style={styles.label}>Price (₹)</ThemedText>
+                    <ThemedText style={styles.label}>Selling Price (₹)</ThemedText>
                     <TextInput
                       style={[styles.input, { color: colors.text }]}
                       value={editPrice}
                       onChangeText={setEditPrice}
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+                  <View style={styles.inputGroup}>
+                    <ThemedText style={styles.label}>Buying Price (₹)</ThemedText>
+                    <TextInput
+                      style={[styles.input, { color: colors.text }]}
+                      value={editBuyingPrice}
+                      onChangeText={setEditBuyingPrice}
                       keyboardType="decimal-pad"
                     />
                   </View>
@@ -139,9 +166,11 @@ export default function InventoryScreen() {
               </>
             ) : (
               <>
-                <ThemedText type="defaultSemiBold">{p.name}</ThemedText>
+                <ThemedText type="defaultSemiBold">
+                  {p.name}{p.quantity < LOW_STOCK_THRESHOLD ? ' ⚠️' : ''}
+                </ThemedText>
                 <ThemedText style={styles.meta}>
-                  Qty: {p.quantity} • ₹{p.price.toFixed(2)} each
+                  Qty: {p.quantity} • Selling: ₹{p.price.toFixed(2)} • Buying: ₹{(p.buyingPrice ?? 0).toFixed(2)}
                 </ThemedText>
                 <ThemedText style={styles.value}>
                   Value: ₹{(p.quantity * p.price).toFixed(2)}
@@ -176,11 +205,20 @@ export default function InventoryScreen() {
               placeholder="Product name"
               placeholderTextColor={colors.icon}
             />
-            <ThemedText style={styles.label}>Price (₹)</ThemedText>
+            <ThemedText style={styles.label}>Selling Price (₹)</ThemedText>
             <TextInput
               style={[styles.input, styles.modalInput, { color: colors.text }]}
               value={newPrice}
               onChangeText={setNewPrice}
+              placeholder="0"
+              placeholderTextColor={colors.icon}
+              keyboardType="decimal-pad"
+            />
+            <ThemedText style={styles.label}>Buying Price (₹)</ThemedText>
+            <TextInput
+              style={[styles.input, styles.modalInput, { color: colors.text }]}
+              value={newBuyingPrice}
+              onChangeText={setNewBuyingPrice}
               placeholder="0"
               placeholderTextColor={colors.icon}
               keyboardType="decimal-pad"
@@ -194,6 +232,11 @@ export default function InventoryScreen() {
               placeholderTextColor={colors.icon}
               keyboardType="numeric"
             />
+            {newBuyingPrice && newQty ? (
+              <ThemedText style={styles.expenseHint}>
+                💡 Expense added: ₹{((parseFloat(newBuyingPrice) || 0) * (parseInt(newQty, 10) || 0)).toFixed(2)}
+              </ThemedText>
+            ) : null}
             <View style={styles.modalActions}>
               <TouchableOpacity onPress={() => setAddModalVisible(false)} disabled={adding}>
                 <ThemedText style={{ color: colors.tint }}>Cancel</ThemedText>
@@ -235,6 +278,20 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
   },
+  lowStockBanner: {
+    marginHorizontal: 24,
+    marginBottom: 8,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(245,158,11,0.15)',
+    borderLeftWidth: 3,
+    borderLeftColor: '#f59e0b',
+  },
+  lowStockText: {
+    color: '#b45309',
+    fontSize: 13,
+    fontWeight: '500',
+  },
   scroll: {
     flex: 1,
   },
@@ -247,6 +304,10 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginBottom: 12,
     backgroundColor: 'rgba(128,128,128,0.08)',
+  },
+  cardLowStock: {
+    borderLeftWidth: 3,
+    borderLeftColor: '#f59e0b',
   },
   meta: {
     marginTop: 4,
@@ -268,11 +329,13 @@ const styles = StyleSheet.create({
   },
   editRow: {
     flexDirection: 'row',
-    gap: 16,
+    gap: 8,
     marginTop: 12,
+    flexWrap: 'wrap',
   },
   inputGroup: {
     flex: 1,
+    minWidth: '30%',
   },
   label: {
     fontSize: 12,
@@ -311,6 +374,12 @@ const styles = StyleSheet.create({
   },
   modalInput: {
     marginBottom: 16,
+  },
+  expenseHint: {
+    fontSize: 13,
+    color: '#ef4444',
+    marginBottom: 8,
+    opacity: 0.9,
   },
   modalActions: {
     flexDirection: 'row',

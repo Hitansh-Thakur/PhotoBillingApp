@@ -37,6 +37,7 @@ export default function AccountScreen() {
   const [openingBalance, setOpeningBalance] = useState(String(profile.openingBalance));
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(true);
+  const [profileSaving, setProfileSaving] = useState(false);
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
 
@@ -69,14 +70,22 @@ export default function AccountScreen() {
     : 0;
   const health = netProfit >= 0 ? 'Healthy' : 'Needs attention';
 
-  const saveProfile = useCallback(() => {
+  const saveProfile = useCallback(async () => {
     const balance = Math.max(0, parseFloat(openingBalance) || 0);
-    updateProfile({
-      storeName: storeName.trim() || profile.storeName,
-      ownerName: ownerName.trim() || profile.ownerName,
-      openingBalance: balance,
-    });
-    setEditModalVisible(false);
+    setProfileSaving(true);
+    try {
+      await updateProfile({
+        storeName: storeName.trim() || profile.storeName,
+        ownerName: ownerName.trim() || profile.ownerName,
+        openingBalance: balance,
+      });
+      setEditModalVisible(false);
+      Alert.alert('Success', 'Profile updated successfully.');
+    } catch {
+      Alert.alert('Error', 'Failed to save profile. Please try again.');
+    } finally {
+      setProfileSaving(false);
+    }
   }, [storeName, ownerName, openingBalance, updateProfile, profile]);
 
   const handleLogout = useCallback(async () => {
@@ -223,17 +232,20 @@ export default function AccountScreen() {
               placeholderTextColor={colors.icon}
               keyboardType="decimal-pad"
             />
-            <View style={styles.modalActions}>
-              <TouchableOpacity onPress={() => setEditModalVisible(false)}>
-                <ThemedText style={{ color: colors.tint }}>Cancel</ThemedText>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.saveBtn, { backgroundColor: colors.tint }]}
-                onPress={saveProfile}
-              >
-                <ThemedText style={styles.saveBtnText}>Save</ThemedText>
-              </TouchableOpacity>
-            </View>
+              <View style={styles.modalActions}>
+              <TouchableOpacity onPress={() => setEditModalVisible(false)} disabled={profileSaving}>
+                  <ThemedText style={{ color: colors.tint }}>Cancel</ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.saveBtn, { backgroundColor: colors.tint }]}
+                  onPress={saveProfile}
+                  disabled={profileSaving}
+                >
+                  <ThemedText style={styles.saveBtnText}>
+                    {profileSaving ? 'Saving…' : 'Save'}
+                  </ThemedText>
+                </TouchableOpacity>
+              </View>
           </ThemedView>
         </View>
       </Modal>

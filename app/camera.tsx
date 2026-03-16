@@ -1,5 +1,6 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
@@ -43,6 +44,34 @@ export default function CameraScreen() {
     }
   }, [permission?.granted]);
 
+  // Pick image from device gallery as alternative to camera
+  const pickFromGallery = useCallback(async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permission Required',
+          'Please allow access to your photo gallery to upload images.'
+        );
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.7,
+        allowsEditing: false,
+      });
+      if (!result.canceled && result.assets.length > 0) {
+        setCapturedUri(result.assets[0].uri);
+        setPreviewMode(true);
+      }
+    } catch (e) {
+      const message = e && typeof e === 'object' && 'message' in e
+        ? String((e as { message: unknown }).message)
+        : 'Failed to open gallery';
+      Alert.alert('Gallery Error', message);
+    }
+  }, []);
+
   const [uploading, setUploading] = useState(false);
   const confirmImage = useCallback(async () => {
     if (!capturedUri) return;
@@ -82,7 +111,14 @@ export default function CameraScreen() {
       <SafeAreaView style={styles.container}>
         <ThemedText style={styles.message}>Camera access is needed to capture products</ThemedText>
         <TouchableOpacity style={styles.permButton} onPress={requestPermission}>
-          <ThemedText style={styles.permButtonText}>Grant Permission</ThemedText>
+          <ThemedText style={styles.permButtonText}>Grant Camera Permission</ThemedText>
+        </TouchableOpacity>
+        {/* Gallery alternative when camera is unavailable */}
+        <TouchableOpacity
+          style={[styles.permButton, { marginTop: 12, backgroundColor: '#7c3aed' }]}
+          onPress={pickFromGallery}
+        >
+          <ThemedText style={styles.permButtonText}>📁 Upload from Gallery Instead</ThemedText>
         </TouchableOpacity>
         {Platform.OS === 'web' && (
           <TouchableOpacity
@@ -135,6 +171,10 @@ export default function CameraScreen() {
           <View style={styles.captureInner} />
         </TouchableOpacity>
         <ThemedText style={styles.captureHint}>Tap to capture products</ThemedText>
+        {/* Gallery upload alternative */}
+        <TouchableOpacity style={styles.galleryBtn} onPress={pickFromGallery}>
+          <ThemedText style={styles.galleryBtnText}>📁 Upload from Gallery</ThemedText>
+        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
@@ -184,6 +224,18 @@ const styles = StyleSheet.create({
   captureHint: {
     color: '#fff',
     marginTop: 16,
+    fontSize: 14,
+  },
+  galleryBtn: {
+    marginTop: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(124, 58, 237, 0.85)',
+    borderRadius: 20,
+  },
+  galleryBtnText: {
+    color: '#fff',
+    fontWeight: '600',
     fontSize: 14,
   },
   previewOverlay: {
