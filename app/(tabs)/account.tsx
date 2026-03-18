@@ -1,4 +1,7 @@
-import { useRouter } from 'expo-router';
+// App name for Profile display
+const APP_NAME = 'Photo Billing';
+
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -28,7 +31,7 @@ interface AnalyticsData {
 }
 
 export default function AccountScreen() {
-  const { profile, updateProfile, loading: appLoading } = useAppData();
+  const { profile, updateProfile, loading: appLoading, analyticsVersion } = useAppData();
   const { logout } = useAuth();
   const router = useRouter();
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -41,25 +44,35 @@ export default function AccountScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const data = await api.get<AnalyticsData>('/api/analytics');
-        if (!cancelled) setAnalytics(data);
-      } catch (e) {
-        if (!cancelled) {
-          const message = e && typeof e === 'object' && 'message' in e
-            ? String((e as { message: unknown }).message)
-            : 'Failed to load analytics';
-          Alert.alert('Error', message);
-        }
-      } finally {
-        if (!cancelled) setAnalyticsLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
+  // ── Shared analytics fetch helper ────────────────────────────────────────────
+  const fetchAnalytics = useCallback(async () => {
+    try {
+      const data = await api.get<AnalyticsData>('/api/analytics');
+      setAnalytics(data);
+    } catch (e) {
+      const message = e && typeof e === 'object' && 'message' in e
+        ? String((e as { message: unknown }).message)
+        : 'Failed to load analytics';
+      Alert.alert('Error', message);
+    } finally {
+      setAnalyticsLoading(false);
+    }
   }, []);
+
+  // ── Re-fetch on tab focus ─────────────────────────────────────────────────────
+  useFocusEffect(
+    useCallback(() => {
+      setAnalyticsLoading(true);
+      fetchAnalytics();
+    }, [fetchAnalytics])
+  );
+
+  // ── Re-fetch when inventory/bills change in real-time ─────────────────────────
+  // analyticsVersion bumps whenever addBill or updateInventory succeeds
+  useEffect(() => {
+    if (analyticsVersion === 0) return; // skip initial mount (useFocusEffect handles it)
+    fetchAnalytics();
+  }, [analyticsVersion, fetchAnalytics]);
 
   const totalRevenue = analytics?.profitLoss?.totalIncome ?? 0;
   const netProfit = analytics?.profitLoss?.profit ?? 0;
@@ -70,7 +83,16 @@ export default function AccountScreen() {
     : 0;
   const health = netProfit >= 0 ? 'Healthy' : 'Needs attention';
 
+  const [profileError, setProfileError] = useState('');
+
   const saveProfile = useCallback(async () => {
+    // Validate opening balance
+    const balanceRaw = parseFloat(openingBalance);
+    if (openingBalance.trim() !== '' && (isNaN(balanceRaw) || balanceRaw <= 0)) {
+      setProfileError('Opening balance must be greater than 0');
+      return;
+    }
+    setProfileError('');
     const balance = Math.max(0, parseFloat(openingBalance) || 0);
     setProfileSaving(true);
     try {
@@ -115,7 +137,8 @@ export default function AccountScreen() {
         </ThemedText>
 
         <ThemedView style={styles.profileCard}>
-          <ThemedText type="defaultSemiBold">{profile.storeName}</ThemedText>
+          <ThemedText style={styles.appNameBadge}>{APP_NAME}</ThemedText>
+          <ThemedText type="defaultSemiBold" style={styles.storeName}>{profile.storeName}</ThemedText>
           <ThemedText style={styles.profileMeta}>{profile.ownerName}</ThemedText>
           <ThemedText style={styles.profileMeta}>
             Opening balance: ₹{profile.openingBalance.toFixed(2)}
@@ -225,13 +248,16 @@ export default function AccountScreen() {
             />
             <ThemedText style={styles.label}>Opening Balance (₹)</ThemedText>
             <TextInput
-              style={[styles.input, { color: colors.text }]}
+              style={[styles.input, { color: colors.text, borderColor: profileError ? '#ef4444' : 'rgba(128,128,128,0.3)' }]}
               value={openingBalance}
-              onChangeText={setOpeningBalance}
-              placeholder="0"
+              onChangeText={(t) => { setOpeningBalance(t); setProfileError(''); }}
+              placeholder="Enter amount > 0"
               placeholderTextColor={colors.icon}
               keyboardType="decimal-pad"
             />
+            {profileError ? (
+              <ThemedText style={styles.profileErrorText}>{profileError}</ThemedText>
+            ) : null}
               <View style={styles.modalActions}>
               <TouchableOpacity onPress={() => setEditModalVisible(false)} disabled={profileSaving}>
                   <ThemedText style={{ color: colors.tint }}>Cancel</ThemedText>
@@ -285,9 +311,26 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     backgroundColor: 'rgba(128,128,128,0.08)',
   },
+  appNameBadge: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    opacity: 0.5,
+    marginBottom: 4,
+  },
+  storeName: {
+    fontSize: 18,
+  },
   profileMeta: {
     marginTop: 4,
     opacity: 0.8,
+  },
+  profileErrorText: {
+    color: '#ef4444',
+    fontSize: 12,
+    marginTop: -12,
+    marginBottom: 8,
   },
   profileActions: {
     flexDirection: 'row',

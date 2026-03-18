@@ -62,9 +62,10 @@ interface AppDataContextValue extends AppData {
   lastGeneratedBillId: string | null;
   pendingImagePath: string | null;
   lowStockProducts: Product[];
+  analyticsVersion: number;
   setPendingBillItems: (items: BillItem[]) => void;
   setPendingImagePath: (path: string | null) => void;
-  addBill: (items: BillItem[], total: number, imagePath?: string | null) => Promise<string | null>;
+  addBill: (items: BillItem[], total: number, imagePath?: string | null, source?: 'ai' | 'manual') => Promise<string | null>;
   updateInventory: (productId: string, updates: Partial<Pick<Product, 'quantity' | 'price' | 'name' | 'buyingPrice'>>) => Promise<void>;
   addProduct: (product: Omit<Product, 'id'> & { buyingPrice?: number }) => Promise<void>;
   updateProfile: (updates: Partial<Profile>) => Promise<void>;
@@ -86,6 +87,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [pendingBillItems, setPendingBillItemsState] = useState<BillItem[]>([]);
   const [lastGeneratedBillId, setLastGeneratedBillId] = useState<string | null>(null);
   const [pendingImagePath, setPendingImagePathState] = useState<string | null>(null);
+  // Bumped every time bills or inventory change so analytics subscribers re-fetch automatically
+  const [analyticsVersion, setAnalyticsVersion] = useState(0);
+  const bumpAnalytics = useCallback(() => setAnalyticsVersion((v) => v + 1), []);
 
   const persist = useCallback((next: AppData) => {
     setData(next);
@@ -178,7 +182,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const addBill = useCallback(
-    async (items: BillItem[], total: number, imagePath?: string | null): Promise<string | null> => {
+    async (items: BillItem[], total: number, imagePath?: string | null, source: 'ai' | 'manual' = 'ai'): Promise<string | null> => {
       try {
         const body = {
           items: items.map((i) => ({
@@ -187,8 +191,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
             price: i.price,
           })),
           imagePath: imagePath ?? undefined,
+          source,
         };
-        const bill = await api.post<{ bill_id: number; total_amount: number; items: ApiBillItem[]; date: string }>(
+        const bill = await api.post<{ bill_id: number; total_amount: number; items: ApiBillItem[]; date: string; source?: string }>(
           '/api/bills',
           body
         );
@@ -211,13 +216,14 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         setPendingImagePathState(null);
         setLastGeneratedBillId(newBill.id);
         await refreshProducts();
+        bumpAnalytics(); // notify analytics consumers (Profile tab)
         return newBill.id;
       } catch (e) {
         console.warn('Create bill failed:', e);
         throw e;
       }
     },
-    [refreshProducts]
+    [refreshProducts, bumpAnalytics]
   );
 
   const updateInventory = useCallback(
@@ -235,8 +241,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         ...prev,
         inventory: prev.inventory.map((p) => (p.id === productId ? mapped : p)),
       }));
+      bumpAnalytics(); // notify analytics consumers (Profile tab)
     },
-    []
+    [bumpAnalytics]
   );
 
   const addProduct = useCallback(async (product: Omit<Product, 'id'> & { buyingPrice?: number }) => {
@@ -301,6 +308,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     lastGeneratedBillId,
     pendingImagePath,
     lowStockProducts,
+    analyticsVersion,
     setPendingBillItems,
     setPendingImagePath,
     addBill,

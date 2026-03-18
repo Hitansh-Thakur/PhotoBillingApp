@@ -14,16 +14,18 @@ router.post(
     body('items.*.product_id').isInt({ min: 1 }).withMessage('Valid product_id required'),
     body('items.*.quantity').isInt({ min: 1 }).withMessage('Valid quantity required'),
     body('items.*.price').optional().isFloat({ min: 0 }),
-    body('imagePath').optional().isString()
+    body('imagePath').optional().isString(),
+    body('source').optional().isIn(['ai', 'manual']).withMessage('source must be "ai" or "manual"')
   ],
   handleValidationErrors,
   async (req, res) => {
     try {
-      const { items, imagePath } = req.body;
+      const { items, imagePath, source } = req.body;
       const bill = await billService.createBill({
         userId: req.user.userId,
         items,
-        imagePath: imagePath || null
+        imagePath: imagePath || null,
+        source: source || 'ai'
       });
       res.status(201).json(bill);
     } catch (err) {

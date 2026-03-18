@@ -42,6 +42,17 @@ async function createProduct({ name, price, buying_price, quantity, low_stock_th
   const qty = parseInt(quantity, 10) || 0;
   const threshold = parseInt(low_stock_threshold, 10) || 5;
 
+  // Check for duplicate product name (case-insensitive) for this user
+  const [existing] = await pool.query(
+    'SELECT product_id FROM products WHERE LOWER(name) = LOWER(?) AND user_id = ?',
+    [name, userId]
+  );
+  if (existing.length > 0) {
+    const err = new Error('Product already exists');
+    err.statusCode = 409;
+    throw err;
+  }
+
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
@@ -131,12 +142,14 @@ async function updateProduct(id, { name, price, buying_price, quantity, low_stoc
               `Stock added: ${productName} (+${diff} units @ ₹${effectiveBuyingPrice.toFixed(2)})`, userId]
           );
         } else {
-          // Quantity decreased → income for removed stock
-          const incomeAmount = effectiveBuyingPrice * Math.abs(diff);
+          // Quantity decreased → income from sales (selling price × units sold)
+          const effectiveSellingPrice = price != null ? parseFloat(price) : current.price;
+          const unitsSold = Math.abs(diff);
+          const incomeAmount = effectiveSellingPrice * unitsSold;
           await connection.query(
             'INSERT INTO cashflow (type, amount, date, description, user_id) VALUES (?, ?, ?, ?, ?)',
             ['income', incomeAmount, today,
-              `Stock removed: ${productName} (${diff} units @ ₹${effectiveBuyingPrice.toFixed(2)})`, userId]
+              `Stock sold: ${productName} (${unitsSold} units @ ₹${effectiveSellingPrice.toFixed(2)})`, userId]
           );
         }
       }

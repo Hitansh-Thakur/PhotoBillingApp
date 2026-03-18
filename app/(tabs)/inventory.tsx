@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
 import {
     Alert,
     Modal,
@@ -20,35 +21,61 @@ import type { Product } from '@/types';
 const LOW_STOCK_THRESHOLD = 5;
 
 export default function InventoryScreen() {
-  const { inventory, updateInventory, addProduct, loading } = useAppData();
+  const { inventory, updateInventory, addProduct, loading, refreshProducts } = useAppData();
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
   const [editQty, setEditQty] = useState('');
   const [editPrice, setEditPrice] = useState('');
   const [editBuyingPrice, setEditBuyingPrice] = useState('');
+  const [editQtyError, setEditQtyError] = useState('');
+  const [editNameError, setEditNameError] = useState('');
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [newName, setNewName] = useState('');
   const [newPrice, setNewPrice] = useState('');
   const [newBuyingPrice, setNewBuyingPrice] = useState('');
   const [newQty, setNewQty] = useState('');
+  const [addError, setAddError] = useState('');
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
 
   const startEdit = (p: Product) => {
     setEditingId(p.id);
+    setEditName(p.name);
     setEditQty(String(p.quantity));
     setEditPrice(String(p.price));
     setEditBuyingPrice(String(p.buyingPrice ?? 0));
+    setEditNameError('');
+    setEditQtyError('');
   };
+
+  // Refresh products from server every time this tab is focused
+  useFocusEffect(
+    useCallback(() => {
+      refreshProducts();
+    }, [refreshProducts])
+  );
 
   const [saving, setSaving] = useState(false);
   const saveEdit = async () => {
     if (!editingId) return;
-    const qty = Math.max(0, parseInt(editQty, 10) || 0);
+    const name = editName.trim();
+    if (!name) {
+      setEditNameError('Product name is required');
+      return;
+    }
+    setEditNameError('');
+    const qtyRaw = parseInt(editQty, 10);
+    if (isNaN(qtyRaw) || qtyRaw <= 0) {
+      setEditQtyError('Quantity must be greater than 0');
+      return;
+    }
+    setEditQtyError('');
+    const qty = qtyRaw;
     const price = Math.max(0, parseFloat(editPrice) || 0);
     const buyingPrice = Math.max(0, parseFloat(editBuyingPrice) || 0);
     setSaving(true);
     try {
-      await updateInventory(editingId, { quantity: qty, price, buyingPrice });
+      await updateInventory(editingId, { name, quantity: qty, price, buyingPrice });
       setEditingId(null);
     } catch (err: unknown) {
       const message = err && typeof err === 'object' && 'message' in err
@@ -65,8 +92,29 @@ export default function InventoryScreen() {
     const name = newName.trim();
     const price = Math.max(0, parseFloat(newPrice) || 0);
     const buyingPrice = Math.max(0, parseFloat(newBuyingPrice) || 0);
-    const quantity = Math.max(0, parseInt(newQty, 10) || 0);
-    if (!name) return;
+    const qtyRaw = parseInt(newQty, 10);
+
+    // Validate name
+    if (!name) {
+      setAddError('Product name is required');
+      return;
+    }
+    // Check for duplicate product name (case-insensitive)
+    const isDuplicate = inventory.some(
+      (p) => p.name.trim().toLowerCase() === name.toLowerCase()
+    );
+    if (isDuplicate) {
+      setAddError('Product already exists');
+      return;
+    }
+    // Validate quantity
+    if (isNaN(qtyRaw) || qtyRaw <= 0) {
+      setAddError('Quantity must be greater than 0');
+      return;
+    }
+
+    setAddError('');
+    const quantity = qtyRaw;
     setAdding(true);
     try {
       await addProduct({ name, price, buyingPrice, quantity });
@@ -79,7 +127,7 @@ export default function InventoryScreen() {
       const message = err && typeof err === 'object' && 'message' in err
         ? String((err as { message: unknown }).message)
         : 'Failed to add product';
-      Alert.alert('Error', message);
+      setAddError(message);
     } finally {
       setAdding(false);
     }
@@ -123,16 +171,32 @@ export default function InventoryScreen() {
           <View key={p.id} style={[styles.card, p.quantity < LOW_STOCK_THRESHOLD && styles.cardLowStock]}>
             {editingId === p.id ? (
               <>
-                <ThemedText type="defaultSemiBold">{p.name}</ThemedText>
+                {/* Name field – now editable */}
+                <View style={styles.inputGroup}>
+                  <ThemedText style={styles.label}>Product Name</ThemedText>
+                  <TextInput
+                    style={[styles.input, { color: colors.text, borderColor: editNameError ? '#ef4444' : 'rgba(128,128,128,0.3)' }]}
+                    value={editName}
+                    onChangeText={(t) => { setEditName(t); setEditNameError(''); }}
+                    placeholder="Product name"
+                    placeholderTextColor={colors.icon}
+                  />
+                  {editNameError ? (
+                    <ThemedText style={styles.fieldError}>{editNameError}</ThemedText>
+                  ) : null}
+                </View>
                 <View style={styles.editRow}>
                   <View style={styles.inputGroup}>
                     <ThemedText style={styles.label}>Qty</ThemedText>
                     <TextInput
-                      style={[styles.input, { color: colors.text }]}
+                      style={[styles.input, { color: colors.text, borderColor: editQtyError ? '#ef4444' : 'rgba(128,128,128,0.3)' }]}
                       value={editQty}
-                      onChangeText={setEditQty}
+                      onChangeText={(t) => { setEditQty(t); setEditQtyError(''); }}
                       keyboardType="numeric"
                     />
+                    {editQtyError ? (
+                      <ThemedText style={styles.fieldError}>{editQtyError}</ThemedText>
+                    ) : null}
                   </View>
                   <View style={styles.inputGroup}>
                     <ThemedText style={styles.label}>Selling Price (₹)</ThemedText>
@@ -191,12 +255,19 @@ export default function InventoryScreen() {
         )}
       </ScrollView>
 
-      <Modal visible={addModalVisible} transparent animationType="slide">
+      <Modal visible={addModalVisible} transparent animationType="slide"
+        onRequestClose={() => { setAddModalVisible(false); setAddError(''); }}
+      >
         <View style={styles.modalOverlay}>
           <ThemedView style={styles.modal}>
             <ThemedText type="title" style={styles.modalTitle}>
               Add Product
             </ThemedText>
+            {addError ? (
+              <ThemedView style={styles.addErrorBox}>
+                <ThemedText style={styles.addErrorText}>⚠ {addError}</ThemedText>
+              </ThemedView>
+            ) : null}
             <ThemedText style={styles.label}>Name</ThemedText>
             <TextInput
               style={[styles.input, styles.modalInput, { color: colors.text }]}
@@ -227,8 +298,8 @@ export default function InventoryScreen() {
             <TextInput
               style={[styles.input, styles.modalInput, { color: colors.text }]}
               value={newQty}
-              onChangeText={setNewQty}
-              placeholder="0"
+              onChangeText={(t) => { setNewQty(t); setAddError(''); }}
+              placeholder="Enter quantity > 0"
               placeholderTextColor={colors.icon}
               keyboardType="numeric"
             />
@@ -238,7 +309,10 @@ export default function InventoryScreen() {
               </ThemedText>
             ) : null}
             <View style={styles.modalActions}>
-              <TouchableOpacity onPress={() => setAddModalVisible(false)} disabled={adding}>
+              <TouchableOpacity
+                onPress={() => { setAddModalVisible(false); setAddError(''); }}
+                disabled={adding}
+              >
                 <ThemedText style={{ color: colors.tint }}>Cancel</ThemedText>
               </TouchableOpacity>
               <TouchableOpacity
@@ -353,6 +427,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 16,
     marginTop: 12,
+  },
+  fieldError: {
+    color: '#ef4444',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  addErrorBox: {
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 12,
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+  },
+  addErrorText: {
+    color: '#ef4444',
+    fontSize: 13,
+    fontWeight: '500',
   },
   empty: {
     padding: 32,

@@ -74,6 +74,9 @@ router.post(
       });
       res.status(201).json(product);
     } catch (err) {
+      if (err.statusCode === 409) {
+        return res.status(409).json({ message: err.message });
+      }
       console.error("Create product error:", err);
       res.status(500).json({ message: "Internal server error" });
     }
