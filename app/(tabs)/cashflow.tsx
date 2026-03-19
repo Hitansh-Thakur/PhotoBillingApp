@@ -1,6 +1,18 @@
-import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as Print from 'expo-print';
 
 import { api } from '@/backend/src/utils/api';
 import { ExpenseFormModal } from '@/components/ExpenseFormModal';
@@ -26,6 +38,21 @@ interface CashflowEntry {
   bill_id: number | null;
 }
 
+interface BillItem {
+  bill_item_id: number;
+  product_id: number;
+  name: string;
+  quantity: number;
+  price: number;
+}
+
+interface BillDetails {
+  bill_id: number;
+  date: string;
+  total_amount: number;
+  items: BillItem[];
+}
+
 export default function CashflowScreen() {
   const { loading: appLoading } = useAppData();
   const [summary, setSummary] = useState<CashflowSummary | null>(null);
@@ -37,6 +64,12 @@ export default function CashflowScreen() {
   const [operationLoading, setOperationLoading] = useState(false);
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+
+  // Bill details modal state
+  const [billModalVisible, setBillModalVisible] = useState(false);
+  const [selectedBill, setSelectedBill] = useState<BillDetails | null>(null);
+  const [billLoading, setBillLoading] = useState(false);
+
 
   const fetchCashflow = useCallback(async () => {
     setLoading(true);
@@ -56,9 +89,183 @@ export default function CashflowScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    fetchCashflow();
-  }, [fetchCashflow]);
+  // Re-fetch cashflow every time this tab comes into focus so entries added
+  // via bills or from other screens are reflected immediately.
+  useFocusEffect(
+    useCallback(() => {
+      fetchCashflow();
+    }, [fetchCashflow])
+  );
+
+  // Open bill details when user taps a "From Bill" entry
+  const handleViewBill = useCallback(async (billId: number) => {
+    setBillLoading(true);
+    setBillModalVisible(true);
+    setSelectedBill(null);
+    try {
+      // Fetch bill items
+      const items = await api.get<BillItem[]>(`/api/bills/${billId}/items`);
+      const total = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+      setSelectedBill({
+        bill_id: billId,
+        date: new Date().toLocaleDateString(),
+        total_amount: total,
+        items,
+      });
+    } catch (e) {
+      const message = e && typeof e === 'object' && 'message' in e
+        ? String((e as { message: unknown }).message)
+        : 'Failed to load bill details';
+      Alert.alert('Error', message);
+      setBillModalVisible(false);
+    } finally {
+      setBillLoading(false);
+    }
+  }, []);
+
+  // Build a clean, simple PDF bill
+  const handlePrintBill = useCallback(async (bill: BillDetails) => {
+    const billDate = bill.date || new Date().toLocaleDateString('en-IN', {
+      day: '2-digit', month: 'long', year: 'numeric',
+    });
+
+    const itemRows = bill.items
+      .map(
+        (i) => `
+        <tr>
+          <td>${i.name}</td>
+          <td style="text-align:center">${i.quantity}</td>
+          <td style="text-align:right">&#8377;${i.price.toFixed(2)}</td>
+          <td style="text-align:right">&#8377;${(i.price * i.quantity).toFixed(2)}</td>
+        </tr>`
+      )
+      .join('');
+
+    const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Bill #${String(bill.bill_id).padStart(4, '0')}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Arial, sans-serif;
+      background: #f5f5f5;
+      padding: 24px 16px;
+      color: #111;
+    }
+    .wrap {
+      max-width: 480px;
+      margin: 0 auto;
+      background: #fff;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid #e0e0e0;
+    }
+    .top {
+      padding: 24px 24px 16px;
+      border-bottom: 2px solid #0a7ea3;
+    }
+    .top h1 { font-size: 20px; font-weight: 700; color: #111; }
+    .top .meta { margin-top: 6px; font-size: 13px; color: #555; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    thead th {
+      background: #f0f8fb;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #555;
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid #ddd;
+    }
+    thead th:not(:first-child) { text-align: right; }
+    thead th:nth-child(2) { text-align: center; }
+    tbody td {
+      padding: 10px 12px;
+      font-size: 14px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    tbody td:not(:first-child) { text-align: right; }
+    tbody td:nth-child(2) { text-align: center; }
+    .total-section { border-top: 2px solid #ddd; }
+    .total-section td {
+      padding: 12px;
+      font-size: 15px;
+      font-weight: 700;
+    }
+    .total-section td:last-child { text-align: right; color: #0a7ea3; }
+    .footer {
+      padding: 14px 24px;
+      font-size: 12px;
+      color: #888;
+      text-align: center;
+      background: #fafafa;
+      border-top: 1px solid #eee;
+    }
+    @media print {
+      body { background: #fff; padding: 0; }
+      .wrap { border: none; border-radius: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <h1>Bill #${String(bill.bill_id).padStart(4, '0')}</h1>
+      <div class="meta">Date: ${billDate} &nbsp;&bull;&nbsp; ${bill.items.length} item(s)</div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:45%">Item</th>
+          <th style="width:12%">Qty</th>
+          <th style="width:20%">Price</th>
+          <th style="width:23%">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${itemRows}
+      </tbody>
+      <tfoot>
+        <tr class="total-section">
+          <td colspan="3">Amount to Pay</td>
+          <td>&#8377;${bill.total_amount.toFixed(2)}</td>
+        </tr>
+      </tfoot>
+    </table>
+    <div class="footer">Thank you for your purchase!</div>
+  </div>
+</body>
+</html>`;
+
+    if (Platform.OS === 'web') {
+      const win = window.open('', '_blank');
+      if (win) {
+        win.document.write(htmlContent);
+        win.document.close();
+        win.print();
+      }
+    } else {
+      try {
+        await Print.printAsync({ html: htmlContent });
+      } catch (e) {
+        try {
+          const text = `Bill #${bill.bill_id}\n` +
+            bill.items.map((i) => `${i.name} x${i.quantity} @ \u20b9${i.price.toFixed(2)} = \u20b9${(i.price * i.quantity).toFixed(2)}`).join('\n') +
+            `\n\nTotal: \u20b9${bill.total_amount.toFixed(2)}`;
+          await Share.share({ message: text, title: `Bill #${bill.bill_id}` });
+        } catch {
+          Alert.alert('Print failed', 'Could not print or share the bill.');
+        }
+      }
+    }
+  }, []);
+
 
   const handleAddEntry = () => {
     setEditingEntry(null);
@@ -108,11 +315,9 @@ export default function CashflowScreen() {
     setOperationLoading(true);
     try {
       if (editingEntry) {
-        // Update existing entry
         await api.put(`/api/cashflow/${editingEntry.entry_id}`, data);
         Alert.alert('Success', 'Entry updated successfully');
       } else {
-        // Add new entry
         await api.post('/api/cashflow', data);
         Alert.alert('Success', 'Entry added successfully');
       }
@@ -207,60 +412,70 @@ export default function CashflowScreen() {
           </View>
         </ThemedView>
 
+
+
         {entries.length > 0 && (
           <ThemedView style={styles.entriesSection}>
             <ThemedText type="subtitle">Recent entries</ThemedText>
-            {entries.slice(0, 20).map((e) => (
-              <View key={e.entry_id} style={styles.entryRow}>
-                <View style={styles.entryInfo}>
-                  <View style={styles.entryHeader}>
+            {entries.slice(0, 20).map((e) => {
+              return (
+                <View key={e.entry_id} style={styles.entryRow}>
+                  {/* Left: date + description + view bill button */}
+                  <View style={styles.entryInfo}>
                     <ThemedText style={styles.entryDate}>{e.date}</ThemedText>
-                    {e.bill_id && (
-                      <View style={styles.billBadge}>
-                        <ThemedText style={styles.billBadgeText}>From Bill</ThemedText>
+                    {e.description ? (
+                      <ThemedText style={styles.entryDescription}>{e.description}</ThemedText>
+                    ) : null}
+                    {e.bill_id ? (
+                      <Pressable
+                        style={styles.viewBillBtn}
+                        onPress={() => handleViewBill(e.bill_id!)}
+                      >
+                        <ThemedText style={styles.viewBillBtnText}>📄 View Bill</ThemedText>
+                      </Pressable>
+                    ) : null}
+                  </View>
+
+                  {/* Right: amount + edit/delete actions */}
+                  <View style={styles.entryRight}>
+                    <ThemedText style={e.type === 'income' ? styles.entryIncome : styles.entryExpense}>
+                      {e.type === 'income' ? '+' : '-'}₹{e.amount.toFixed(2)}
+                    </ThemedText>
+                    {!e.bill_id && (
+                      <View style={styles.entryActions}>
+                        <Pressable
+                          style={[styles.actionButton, { backgroundColor: '#0a7ea320' }]}
+                          onPress={() => handleEditEntry(e)}
+                        >
+                          <ThemedText style={[styles.actionButtonText, { color: '#0a7ea3' }]}>
+                            Edit
+                          </ThemedText>
+                        </Pressable>
+                        <Pressable
+                          style={[styles.actionButton, styles.deleteButton]}
+                          onPress={() => handleDeleteEntry(e)}
+                        >
+                          <ThemedText style={styles.deleteButtonText}>Delete</ThemedText>
+                        </Pressable>
                       </View>
                     )}
                   </View>
-                  {e.description && (
-                    <ThemedText style={styles.entryDescription}>{e.description}</ThemedText>
-                  )}
                 </View>
-                <View style={styles.entryRight}>
-                  <ThemedText style={e.type === 'income' ? styles.entryIncome : styles.entryExpense}>
-                    {e.type === 'income' ? '+' : '-'}₹{e.amount.toFixed(2)}
-                  </ThemedText>
-                  {!e.bill_id && (
-                    <View style={styles.entryActions}>
-                      <Pressable
-                        style={[styles.actionButton, { backgroundColor: colors.tint + '20' }]}
-                        onPress={() => handleEditEntry(e)}
-                      >
-                        <ThemedText style={[styles.actionButtonText, { color: colors.tint }]}>
-                          Edit
-                        </ThemedText>
-                      </Pressable>
-                      <Pressable
-                        style={[styles.actionButton, styles.deleteButton]}
-                        onPress={() => handleDeleteEntry(e)}
-                      >
-                        <ThemedText style={styles.deleteButtonText}>Delete</ThemedText>
-                      </Pressable>
-                    </View>
-                  )}
-                </View>
-              </View>
-            ))}
+              );
+            })}
           </ThemedView>
         )}
       </ScrollView>
 
-      {/* Floating Action Button */}
+      {/* FAB — add entry */}
       <Pressable
-        style={[styles.fab, { backgroundColor: colors.tint }]}
+        style={[styles.fab, { backgroundColor: '#0a7ea3' }]}
         onPress={handleAddEntry}
       >
         <ThemedText style={styles.fabText}>+</ThemedText>
       </Pressable>
+
+
 
       {/* Expense Form Modal */}
       <ExpenseFormModal
@@ -279,6 +494,92 @@ export default function CashflowScreen() {
           setEditingEntry(null);
         }}
       />
+
+      {/* Bill Details Modal */}
+      <Modal visible={billModalVisible} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <ThemedView style={styles.billModal}>
+            <View style={styles.billModalHeader}>
+              <ThemedText type="subtitle">
+                {selectedBill ? `Bill #${selectedBill.bill_id}` : 'Bill Details'}
+              </ThemedText>
+              <Pressable onPress={() => setBillModalVisible(false)} style={styles.closeBtn}>
+                <ThemedText style={styles.closeBtnText}>✕</ThemedText>
+              </Pressable>
+            </View>
+
+            {billLoading ? (
+              <View style={styles.billLoading}>
+                <ActivityIndicator size="large" color={colors.tint} />
+                <ThemedText style={{ opacity: 0.7, marginTop: 8 }}>Loading bill…</ThemedText>
+              </View>
+            ) : selectedBill ? (
+              <>
+                <ScrollView style={styles.billScroll} showsVerticalScrollIndicator={false}>
+                  {/* Table header */}
+                  <View style={[styles.tableRow, styles.tableHeader]}>
+                    <ThemedText style={[styles.tableCell, styles.cellProduct, styles.headerText]}>
+                      Product
+                    </ThemedText>
+                    <ThemedText style={[styles.tableCell, styles.cellNum, styles.headerText]}>
+                      Qty
+                    </ThemedText>
+                    <ThemedText style={[styles.tableCell, styles.cellNum, styles.headerText]}>
+                      Price
+                    </ThemedText>
+                    <ThemedText style={[styles.tableCell, styles.cellNum, styles.headerText]}>
+                      Total
+                    </ThemedText>
+                  </View>
+
+                  {/* Table rows */}
+                  {selectedBill.items.map((item, idx) => (
+                    <View
+                      key={item.bill_item_id}
+                      style={[styles.tableRow, idx % 2 === 0 ? styles.tableRowEven : styles.tableRowOdd]}
+                    >
+                      <ThemedText style={[styles.tableCell, styles.cellProduct]} numberOfLines={2}>
+                        {item.name}
+                      </ThemedText>
+                      <ThemedText style={[styles.tableCell, styles.cellNum]}>
+                        {item.quantity}
+                      </ThemedText>
+                      <ThemedText style={[styles.tableCell, styles.cellNum]}>
+                        ₹{item.price.toFixed(2)}
+                      </ThemedText>
+                      <ThemedText style={[styles.tableCell, styles.cellNum]}>
+                        ₹{(item.price * item.quantity).toFixed(2)}
+                      </ThemedText>
+                    </View>
+                  ))}
+
+                  {/* Total row */}
+                  <View style={[styles.tableRow, styles.totalRow]}>
+                    <ThemedText style={[styles.tableCell, styles.cellProduct, styles.totalText]}>
+                      TOTAL
+                    </ThemedText>
+                    <ThemedText style={[styles.tableCell, styles.cellNum]}></ThemedText>
+                    <ThemedText style={[styles.tableCell, styles.cellNum]}></ThemedText>
+                    <ThemedText style={[styles.tableCell, styles.cellNum, styles.totalText]}>
+                      ₹{selectedBill.total_amount.toFixed(2)}
+                    </ThemedText>
+                  </View>
+                </ScrollView>
+
+                {/* Print / Share button */}
+                <Pressable
+                  style={[styles.printBtn, { backgroundColor: colors.tint }]}
+                  onPress={() => handlePrintBill(selectedBill)}
+                >
+                  <ThemedText style={styles.printBtnText}>
+                    {Platform.OS === 'web' ? '🖨️ Print Bill' : '📤 Share Bill'}
+                  </ThemedText>
+                </Pressable>
+              </>
+            ) : null}
+          </ThemedView>
+        </View>
+      </Modal>
 
       {/* Loading Overlay */}
       {operationLoading && (
@@ -299,7 +600,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 24,
-    paddingBottom: 100, // Extra padding for FAB
+    paddingBottom: 100,
   },
   title: {
     marginBottom: 4,
@@ -333,20 +634,10 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
   },
-  cardHint: {
-    fontSize: 10,
-    opacity: 0.5,
-    marginTop: 2,
-  },
   chartSection: {
     padding: 16,
     borderRadius: 12,
     backgroundColor: 'rgba(128,128,128,0.08)',
-  },
-  chartHint: {
-    fontSize: 12,
-    opacity: 0.6,
-    marginBottom: 16,
   },
   chartPlaceholder: {
     flexDirection: 'row',
@@ -435,15 +726,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 16,
   },
-  billBadge: {
-    backgroundColor: 'rgba(59, 130, 246, 0.2)',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
+  viewBillBtn: {
+    marginTop: 6,
+    alignSelf: 'flex-start',
+    backgroundColor: '#0a7ea3',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 6,
   },
-  billBadgeText: {
-    color: '#3b82f6',
-    fontSize: 10,
+  viewBillBtnText: {
+    color: '#ffffff',
+    fontSize: 12,
     fontWeight: '600',
   },
   entryActions: {
@@ -467,6 +760,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  // FAB action sheet
+  // existing
   fab: {
     position: 'absolute',
     bottom: 24,
@@ -497,5 +792,90 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-});
+  // Bill details modal
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  billModal: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    paddingBottom: 40,
+    maxHeight: '85%',
+  },
+  billModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  closeBtn: {
+    padding: 4,
+  },
+  closeBtnText: {
+    fontSize: 18,
+    opacity: 0.7,
+  },
+  billLoading: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  billScroll: {
+    maxHeight: 320,
+  },
+  tableRow: {
+    flexDirection: 'row',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(128,128,128,0.12)',
+  },
+  tableHeader: {
+    borderBottomWidth: 2,
+    borderBottomColor: 'rgba(128,128,128,0.25)',
+  },
+  tableRowEven: {
+    backgroundColor: 'rgba(128,128,128,0.04)',
+  },
+  tableRowOdd: {
+    backgroundColor: 'transparent',
+  },
+  tableCell: {
+    fontSize: 13,
+  },
+  cellProduct: {
+    flex: 2,
+    paddingRight: 4,
+  },
+  cellNum: {
+    flex: 1,
+    textAlign: 'right',
+  },
+  headerText: {
+    fontWeight: '700',
+    fontSize: 12,
+    opacity: 0.7,
+  },
+  totalRow: {
+    borderTopWidth: 2,
+    borderTopColor: 'rgba(128,128,128,0.3)',
+    borderBottomWidth: 0,
+    marginTop: 4,
+  },
+  totalText: {
+    fontWeight: '700',
+  },
+  printBtn: {
+    marginTop: 20,
+    padding: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  printBtnText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
 
+});

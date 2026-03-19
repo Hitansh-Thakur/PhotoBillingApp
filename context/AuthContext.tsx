@@ -28,6 +28,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const logout = useCallback(async () => {
+    // Notify backend to log logout activity + session duration
+    try {
+      const token = await getToken();
+      if (token) {
+        await api.post('/api/auth/logout', {});
+      }
+    } catch {
+      // Non-critical: ignore errors during logout notification
+    }
     await clearToken();
     const auth = await loadAuth();
     await saveAuth({

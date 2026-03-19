@@ -55,14 +55,28 @@ export function ExpenseFormModal({
     const [date, setDate] = useState(
         initialData?.date || new Date().toISOString().split('T')[0]
     );
+    const [amountError, setAmountError] = useState('');
 
     const handleSubmit = () => {
-        // Validation
+        // Validate amount
         const numAmount = parseFloat(amount);
-        if (isNaN(numAmount) || numAmount <= 0) {
-            Alert.alert('Invalid Amount', 'Please enter a valid positive amount');
+        if (!amount.trim()) {
+            setAmountError('Amount is required');
             return;
         }
+        if (isNaN(numAmount)) {
+            setAmountError('Please enter a valid number');
+            return;
+        }
+        if (numAmount < 0) {
+            setAmountError('Amount cannot be negative');
+            return;
+        }
+        if (numAmount === 0) {
+            setAmountError('Amount cannot be zero');
+            return;
+        }
+        setAmountError('');
 
         const today = new Date().toISOString().split('T')[0];
         if (date > today) {
@@ -143,16 +157,19 @@ export function ExpenseFormModal({
                                     styles.input,
                                     {
                                         color: colors.text,
-                                        borderColor: colors.tint + '40',
+                                        borderColor: amountError ? '#ef4444' : colors.tint + '40',
                                         backgroundColor: colors.background,
                                     },
                                 ]}
                                 value={amount}
-                                onChangeText={setAmount}
+                                onChangeText={(t) => { setAmount(t); setAmountError(''); }}
                                 keyboardType="decimal-pad"
                                 placeholder="0.00"
                                 placeholderTextColor={colors.text + '60'}
                             />
+                            {amountError ? (
+                                <ThemedText style={styles.amountError}>{amountError}</ThemedText>
+                            ) : null}
                         </View>
 
                         {/* Description */}
@@ -257,6 +274,12 @@ const styles = StyleSheet.create({
         borderRadius: 8,
         padding: 12,
         fontSize: 16,
+    },
+    amountError: {
+        color: '#ef4444',
+        fontSize: 12,
+        marginTop: 4,
+        fontWeight: '500',
     },
     textArea: {
         minHeight: 80,

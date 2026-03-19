@@ -6,8 +6,9 @@ const pool = require('../config/db');
  * @param {number} params.userId - User ID
  * @param {Array<{product_id: number, quantity: number, price?: number}>} params.items - Bill items
  * @param {string} [params.imagePath] - Optional image path from upload
+ * @param {'ai'|'manual'} [params.source='ai'] - Source of the bill (AI-detected or manually created)
  */
-async function createBill({ userId, items, imagePath = null }) {
+async function createBill({ userId, items, imagePath = null, source = 'ai' }) {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
@@ -39,8 +40,8 @@ async function createBill({ userId, items, imagePath = null }) {
     const total = subtotal;
 
     const [billResult] = await connection.query(
-      'INSERT INTO bills (user_id, total_amount, image_path) VALUES (?, ?, ?)',
-      [userId || null, total, imagePath]
+      'INSERT INTO bills (user_id, total_amount, image_path, source) VALUES (?, ?, ?, ?)',
+      [userId || null, total, imagePath, source]
     );
     const billId = billResult.insertId;
 
@@ -55,9 +56,12 @@ async function createBill({ userId, items, imagePath = null }) {
       );
     }
 
+    const billDescription = source === 'manual'
+      ? `Manual Bill – #${billId}`
+      : `Bill – #${billId}`;
     await connection.query(
-      'INSERT INTO cashflow (type, amount, bill_id, user_id) VALUES (?, ?, ?, ?)',
-      ['income', total, billId, userId]
+      'INSERT INTO cashflow (type, amount, bill_id, description, user_id) VALUES (?, ?, ?, ?, ?)',
+      ['income', total, billId, billDescription, userId]
     );
 
     await connection.commit();
@@ -66,6 +70,7 @@ async function createBill({ userId, items, imagePath = null }) {
       bill_id: billId,
       total_amount: total,
       items: billItems,
+      source,
       date: new Date().toISOString().split('T')[0]
     };
   } catch (err) {
