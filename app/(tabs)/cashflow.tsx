@@ -422,7 +422,15 @@ export default function CashflowScreen() {
                 <View key={e.entry_id} style={styles.entryRow}>
                   {/* Left: date + description + view bill button */}
                   <View style={styles.entryInfo}>
-                    <ThemedText style={styles.entryDate}>{e.date}</ThemedText>
+                    <ThemedText style={styles.entryDate}>
+                      {Number.isNaN(new Date(e.date).getTime())
+                      ? e.date
+                      : new Date(e.date).toLocaleDateString('en-IN', {
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric',
+                        })}
+                    </ThemedText>
                     {e.description ? (
                       <ThemedText style={styles.entryDescription}>{e.description}</ThemedText>
                     ) : null}
@@ -572,7 +580,7 @@ export default function CashflowScreen() {
                   onPress={() => handlePrintBill(selectedBill)}
                 >
                   <ThemedText style={styles.printBtnText}>
-                    {Platform.OS === 'web' ? '🖨️ Print Bill' : '📤 Share Bill'}
+                    🖨️ Print Bill 
                   </ThemedText>
                 </Pressable>
               </>
