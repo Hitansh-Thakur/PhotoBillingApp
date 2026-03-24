@@ -57,14 +57,15 @@ router.post(
   [
     body('name').trim().notEmpty().withMessage('Name required'),
     body('businessName').optional().trim(),
+    body('openingBalance').optional().isFloat({ min: 0 }).withMessage('Valid opening balance required'),
     body('email').isEmail().normalizeEmail().withMessage('Valid email required'),
     body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters')
   ],
   handleValidationErrors,
   async (req, res) => {
     try {
-      const { name, businessName, email, password } = req.body;
-      const result = await authService.register(name, email, password, businessName);
+      const { name, businessName, email, password, openingBalance } = req.body;
+      const result = await authService.register(name, email, password, businessName, openingBalance || 0);
       if (!result.success) {
         return res.status(400).json({ message: result.message });
       }

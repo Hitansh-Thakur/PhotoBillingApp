@@ -24,7 +24,7 @@ router.get('/', async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
     const summary = await cashflowService.getCashflowSummary(req.user.userId, startDate || null, endDate || null);
-    const entries = await cashflowService.getCashflowEntries(req.user.userId, 100);
+    const entries = await cashflowService.getCashflowEntries(req.user.userId, 100, null, startDate || null, endDate || null);
     res.json({ summary, entries });
   } catch (err) {
     console.error('Get cashflow error:', err);

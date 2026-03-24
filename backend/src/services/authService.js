@@ -34,15 +34,15 @@ async function login(email, password) {
   };
 }
 
-async function register(name, email, password, businessName = null) {
+async function register(name, email, password, businessName = null, openingBalance = 0) {
   const [existing] = await pool.query('SELECT user_id FROM users WHERE email = ?', [email]);
   if (existing.length > 0) {
     return { success: false, message: 'Email already registered' };
   }
   const hashed = await bcrypt.hash(password, 10);
   const [result] = await pool.query(
-    'INSERT INTO users (name, business_name, email, password) VALUES (?, ?, ?, ?)',
-    [name, businessName, email, hashed]
+    'INSERT INTO users (name, business_name, email, password, opening_balance) VALUES (?, ?, ?, ?, ?)',
+    [name, businessName, email, hashed, openingBalance]
   );
   const userId = result.insertId;
   const token = jwt.sign({ userId }, JWT_SECRET, { expiresIn: JWT_EXPIRES });

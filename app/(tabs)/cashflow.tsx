@@ -21,11 +21,13 @@ import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useAppData } from '@/context/AppDataContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 interface CashflowSummary {
   totalIncome: number;
   totalExpenses: number;
   balance: number;
+  openingBalance?: number;
   period: { startDate: string; endDate: string } | null;
 }
 
@@ -70,12 +72,33 @@ export default function CashflowScreen() {
   const [selectedBill, setSelectedBill] = useState<BillDetails | null>(null);
   const [billLoading, setBillLoading] = useState(false);
 
+  type PeriodFilter = 'all' | 'today' | 'month' | 'custom';
+  const [periodType, setPeriodType] = useState<PeriodFilter>('month');
+  const [customStart, setCustomStart] = useState<Date>(new Date());
+  const [customEnd, setCustomEnd] = useState<Date>(new Date());
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [showEndPicker, setShowEndPicker] = useState(false);
+
 
   const fetchCashflow = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await api.get<{ summary: CashflowSummary; entries: CashflowEntry[] }>('/api/cashflow');
+      let query = '';
+      if (periodType !== 'all') {
+        let start = new Date();
+        let end = new Date();
+        if (periodType === 'today') {
+          // start and end are already new Date()
+        } else if (periodType === 'month') {
+          start = new Date(start.getFullYear(), start.getMonth(), 1);
+        } else if (periodType === 'custom') {
+          start = customStart;
+          end = customEnd;
+        }
+        query = `?startDate=${start.toISOString().split('T')[0]}&endDate=${end.toISOString().split('T')[0]}`;
+      }
+      const res = await api.get<{ summary: CashflowSummary; entries: CashflowEntry[] }>(`/api/cashflow${query}`);
       setSummary(res.summary);
       setEntries(res.entries);
     } catch (e) {
@@ -87,7 +110,7 @@ export default function CashflowScreen() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [periodType, customStart, customEnd]);
 
   // Re-fetch cashflow every time this tab comes into focus so entries added
   // via bills or from other screens are reflected immediately.
@@ -365,12 +388,70 @@ export default function CashflowScreen() {
           </ThemedView>
         ) : null}
 
+        <View style={styles.filterSegment}>
+          {(['all', 'today', 'month', 'custom'] as PeriodFilter[]).map((p) => (
+            <Pressable
+              key={p}
+              style={[styles.filterBtn, periodType === p && { backgroundColor: colors.tint }]}
+              onPress={() => setPeriodType(p)}
+            >
+              <ThemedText
+                style={[styles.filterBtnText, periodType === p && { color: '#fff' }]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+              >
+                {p === 'all' ? 'All Time' : p === 'today' ? 'Today' : p === 'month' ? 'This Month' : 'Custom'}
+              </ThemedText>
+            </Pressable>
+          ))}
+        </View>
+
+        {periodType === 'custom' && (
+          <View style={styles.customDateContainer}>
+            <Pressable style={styles.dateBtn} onPress={() => setShowStartPicker(true)}>
+              <ThemedText style={styles.dateBtnText}>Start: {customStart.toLocaleDateString()}</ThemedText>
+            </Pressable>
+            <ThemedText style={{ marginHorizontal: 8 }}>to</ThemedText>
+            <Pressable style={styles.dateBtn} onPress={() => setShowEndPicker(true)}>
+              <ThemedText style={styles.dateBtnText}>End: {customEnd.toLocaleDateString()}</ThemedText>
+            </Pressable>
+          </View>
+        )}
+
+        {showStartPicker && (
+          <DateTimePicker
+            value={customStart}
+            mode="date"
+            display="default"
+            onChange={(event: any, date?: Date) => {
+              setShowStartPicker(false);
+              if (date) setCustomStart(date);
+            }}
+          />
+        )}
+        {showEndPicker && (
+          <DateTimePicker
+            value={customEnd}
+            mode="date"
+            display="default"
+            onChange={(event: any, date?: Date) => {
+              setShowEndPicker(false);
+              if (date) setCustomEnd(date);
+            }}
+          />
+        )}
+
         <View style={styles.cards}>
           <ThemedView style={[styles.card, styles.primaryCard]}>
-            <ThemedText style={styles.cardLabel}>Balance</ThemedText>
+            <ThemedText style={styles.cardLabel}>Closing Balance</ThemedText>
             <ThemedText style={styles.cardValue}>
               ₹{balance.toFixed(2)}
             </ThemedText>
+          </ThemedView>
+
+          <ThemedView style={styles.card}>
+            <ThemedText style={styles.cardLabel}>Opening Balance</ThemedText>
+            <ThemedText style={styles.cardValue}>₹{(summary?.openingBalance ?? 0).toFixed(2)}</ThemedText>
           </ThemedView>
 
           <ThemedView style={styles.card}>
@@ -641,6 +722,38 @@ const styles = StyleSheet.create({
   cardValue: {
     fontSize: 20,
     fontWeight: '700',
+  },
+  filterSegment: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(128,128,128,0.08)',
+    borderRadius: 8,
+    padding: 4,
+    marginBottom: 16,
+  },
+  filterBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+    borderRadius: 6,
+  },
+  filterBtnText: {
+    fontSize: 10.5,
+    fontWeight: '600',
+  },
+  customDateContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  dateBtn: {
+    backgroundColor: 'rgba(128,128,128,0.08)',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+  },
+  dateBtnText: {
+    fontSize: 13,
   },
   chartSection: {
     padding: 16,

@@ -1,6 +1,29 @@
 const pool = require('../config/db');
 
 async function getCashflowSummary(userId, startDate = null, endDate = null) {
+  // Get base opening_balance from users table
+  const [userRows] = await pool.query('SELECT opening_balance FROM users WHERE user_id = ?', [userId]);
+  const baseOpeningBalance = parseFloat(userRows[0]?.opening_balance || 0);
+
+  let prevIncome = 0;
+  let prevExpense = 0;
+
+  if (startDate) {
+    // Calculate historical balance changes prior to the startDate
+    const [prevIncRows] = await pool.query(
+      `SELECT COALESCE(SUM(amount), 0) as total FROM cashflow WHERE user_id = ? AND type = 'income' AND date < ?`,
+      [userId, startDate]
+    );
+    const [prevExpRows] = await pool.query(
+      `SELECT COALESCE(SUM(amount), 0) as total FROM cashflow WHERE user_id = ? AND type = 'expense' AND date < ?`,
+      [userId, startDate]
+    );
+    prevIncome = parseFloat(prevIncRows[0]?.total || 0);
+    prevExpense = parseFloat(prevExpRows[0]?.total || 0);
+  }
+
+  const dynamicOpeningBalance = baseOpeningBalance + prevIncome - prevExpense;
+
   const dateFilter = startDate && endDate ? ' AND date BETWEEN ? AND ?' : '';
   const params = [userId];
   if (startDate && endDate) {
@@ -18,19 +41,24 @@ async function getCashflowSummary(userId, startDate = null, endDate = null) {
 
   const totalIncome = parseFloat(incomeRows[0]?.total || 0);
   const totalExpenses = parseFloat(expenseRows[0]?.total || 0);
-  const balance = totalIncome - totalExpenses;
+  const balance = dynamicOpeningBalance + totalIncome - totalExpenses;
 
   return {
     totalIncome,
     totalExpenses,
+    openingBalance: dynamicOpeningBalance,
     balance,
     period: startDate && endDate ? { startDate, endDate } : null
   };
 }
 
-async function getCashflowEntries(userId, limit = 100, type = null) {
+async function getCashflowEntries(userId, limit = 100, type = null, startDate = null, endDate = null) {
   let sql = 'SELECT entry_id, type, amount, date, description, bill_id, created_at FROM cashflow WHERE user_id = ?';
   const params = [userId];
+  if (startDate && endDate) {
+    sql += ' AND date BETWEEN ? AND ?';
+    params.push(startDate, endDate);
+  }
   if (type) {
     sql += ' AND type = ?';
     params.push(type);

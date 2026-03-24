@@ -115,6 +115,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         businessName: newUser.businessName?.trim() || null,
         email: newUser.email.trim().toLowerCase(),
         password: newUser.password,
+        openingBalance: newUser.openingBalance || 0,
       });
       const { token, user: apiUser } = res;
       await saveToken(token);
