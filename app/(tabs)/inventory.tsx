@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { BarcodeScanner } from '@/components/BarcodeScanner';
 import { Colors } from '@/constants/theme';
 import { useAppData } from '@/context/AppDataContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -37,6 +38,7 @@ export default function InventoryScreen() {
   const [newQty, setNewQty] = useState('');
   const [newBarcode, setNewBarcode] = useState('');
   const [addError, setAddError] = useState('');
+  const [scannerMode, setScannerMode] = useState<'add' | 'edit' | null>(null);
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
 
@@ -77,6 +79,15 @@ export default function InventoryScreen() {
     const price = Math.max(0, parseFloat(editPrice) || 0);
     const buyingPrice = Math.max(0, parseFloat(editBuyingPrice) || 0);
     const barcode = editBarcode.trim() || undefined;
+
+    if (barcode) {
+      const barcodeExists = inventory.some(p => p.barcode === barcode && p.id !== editingId);
+      if (barcodeExists) {
+        Alert.alert('Error', 'A product with this barcode already exists');
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       await updateInventory(editingId, { name, quantity: qty, price, buyingPrice, barcode });
@@ -120,6 +131,15 @@ export default function InventoryScreen() {
     setAddError('');
     const quantity = qtyRaw;
     const barcode = newBarcode.trim() || undefined;
+
+    if (barcode) {
+      const barcodeExists = inventory.some(p => p.barcode === barcode);
+      if (barcodeExists) {
+        setAddError('A product with this barcode already exists');
+        return;
+      }
+    }
+
     setAdding(true);
     try {
       await addProduct({ name, price, buyingPrice, quantity, barcode });
@@ -224,13 +244,18 @@ export default function InventoryScreen() {
                   </View>
                   <View style={styles.inputGroup}>
                     <ThemedText style={styles.label}>Barcode</ThemedText>
-                    <TextInput
-                      style={[styles.input, { color: colors.text }]}
-                      value={editBarcode}
-                      onChangeText={setEditBarcode}
-                      placeholder="Optional"
-                      placeholderTextColor={colors.icon}
-                    />
+                    <View style={styles.rowLayout}>
+                      <TextInput
+                        style={[styles.input, { flex: 1, color: colors.text }]}
+                        value={editBarcode}
+                        onChangeText={setEditBarcode}
+                        placeholder="Optional"
+                        placeholderTextColor={colors.icon}
+                      />
+                      <TouchableOpacity onPress={() => setScannerMode('edit')} style={styles.scanActionBtn}>
+                        <ThemedText style={{fontSize: 20}}>📷</ThemedText>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 </View>
                 <View style={styles.editActions}>
@@ -325,13 +350,18 @@ export default function InventoryScreen() {
               keyboardType="numeric"
             />
             <ThemedText style={styles.label}>Barcode (Optional)</ThemedText>
-            <TextInput
-              style={[styles.input, styles.modalInput, { color: colors.text }]}
-              value={newBarcode}
-              onChangeText={setNewBarcode}
-              placeholder="Scan or enter barcode"
-              placeholderTextColor={colors.icon}
-            />
+            <View style={[styles.rowLayout, styles.modalInput]}>
+              <TextInput
+                style={[styles.input, { flex: 1, color: colors.text }]}
+                value={newBarcode}
+                onChangeText={setNewBarcode}
+                placeholder="Scan or enter barcode"
+                placeholderTextColor={colors.icon}
+              />
+              <TouchableOpacity onPress={() => setScannerMode('add')} style={styles.scanActionBtn}>
+                <ThemedText style={{fontSize: 20}}>📷</ThemedText>
+              </TouchableOpacity>
+            </View>
             {newBuyingPrice && newQty ? (
               <ThemedText style={styles.expenseHint}>
                 💡 Expense added: ₹{((parseFloat(newBuyingPrice) || 0) * (parseInt(newQty, 10) || 0)).toFixed(2)}
@@ -354,6 +384,29 @@ export default function InventoryScreen() {
             </View>
           </ThemedView>
         </View>
+      </Modal>
+
+      <Modal visible={scannerMode !== null} transparent animationType="slide" onRequestClose={() => setScannerMode(null)}>
+        <BarcodeScanner
+          active={scannerMode !== null}
+          onScan={(data) => {
+            if (scannerMode === 'add') {
+              const existing = inventory.find(p => p.barcode === data);
+              if (existing) {
+                 Alert.alert('Barcode Exists', `Product "${existing.name}" already uses this barcode.`);
+              }
+              setNewBarcode(data);
+            } else if (scannerMode === 'edit') {
+              const existing = inventory.find(p => p.barcode === data && p.id !== editingId);
+              if (existing) {
+                 Alert.alert('Barcode Exists', `Product "${existing.name}" already uses this barcode.`);
+              }
+              setEditBarcode(data);
+            }
+            setScannerMode(null);
+          }}
+          onClose={() => setScannerMode(null)}
+        />
       </Modal>
     </SafeAreaView>
   );
@@ -439,6 +492,18 @@ const styles = StyleSheet.create({
   inputGroup: {
     flex: 1,
     minWidth: '30%',
+  },
+  rowLayout: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  scanActionBtn: {
+    padding: 8,
+    backgroundColor: 'rgba(128,128,128,0.1)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(128,128,128,0.3)',
   },
   label: {
     fontSize: 12,
