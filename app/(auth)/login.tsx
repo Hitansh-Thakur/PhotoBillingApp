@@ -85,8 +85,8 @@ export default function LoginScreen() {
             <View style={styles.logoMark}>
               <Text style={styles.logoIcon}>📷</Text>
             </View>
-            <Text style={styles.appName}>PhotoBilling</Text>
-            <Text style={styles.tagline}>Manage your studio business</Text>
+            <Text style={styles.appName}>CashTrace</Text>
+            <Text style={styles.tagline}>Manage your Kirana Store</Text>
           </View>
 
           {/* ── Card ───────────────────────────────────────── */}

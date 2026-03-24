@@ -29,7 +29,7 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <ThemedView style={styles.content}>
         <ThemedText type="title" style={styles.title}>
-          Photo Billing
+          CashTrace
         </ThemedText>
         <ThemedText style={styles.subtitle}>
           Capture product images to quickly generate bills
