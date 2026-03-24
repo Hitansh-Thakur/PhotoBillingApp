@@ -2,12 +2,14 @@ import { useState } from 'react';
 import {
     Alert,
     Modal,
+    Platform,
     Pressable,
     ScrollView,
     StyleSheet,
     TextInput,
     View,
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -55,7 +57,17 @@ export function ExpenseFormModal({
     const [date, setDate] = useState(
         initialData?.date || new Date().toISOString().split('T')[0]
     );
+    const [showDatePicker, setShowDatePicker] = useState(false);
     const [amountError, setAmountError] = useState('');
+
+    const onDateChange = (event: any, selectedDate?: Date) => {
+        if (Platform.OS === 'android') {
+            setShowDatePicker(false);
+        }
+        if (selectedDate) {
+            setDate(selectedDate.toISOString().split('T')[0]);
+        }
+    };
 
     const handleSubmit = () => {
         // Validate amount
@@ -197,20 +209,36 @@ export function ExpenseFormModal({
                         {/* Date */}
                         <View style={styles.formGroup}>
                             <ThemedText style={styles.label}>Date</ThemedText>
-                            <TextInput
+                            <Pressable 
                                 style={[
                                     styles.input,
                                     {
-                                        color: colors.text,
                                         borderColor: colors.tint + '40',
                                         backgroundColor: colors.background,
+                                        justifyContent: 'center',
                                     },
                                 ]}
-                                value={date}
-                                onChangeText={setDate}
-                                placeholder="YYYY-MM-DD"
-                                placeholderTextColor={colors.text + '60'}
-                            />
+                                onPress={() => setShowDatePicker(true)}
+                            >
+                                <ThemedText style={{ color: colors.text }}>
+                                    {Number.isNaN(new Date(date).getTime())
+                                        ? date
+                                        : new Date(date).toLocaleDateString('en-IN', {
+                                            day: '2-digit',
+                                            month: 'short',
+                                            year: 'numeric',
+                                        })}
+                                </ThemedText>
+                            </Pressable>
+                            {showDatePicker && (
+                                <DateTimePicker
+                                    value={new Date(date)}
+                                    mode="date"
+                                    display="default"
+                                    onChange={onDateChange}
+                                    maximumDate={new Date()}
+                                />
+                            )}
                         </View>
 
                         {/* Buttons */}
