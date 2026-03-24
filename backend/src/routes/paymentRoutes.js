@@ -48,7 +48,13 @@ router.post('/create-order', authMiddleware, async (req, res) => {
       },
     });
 
-    // Save order record to DB
+    // Save order record to DB and update bill with order_id and status
+    await db.query(
+      `UPDATE bills SET razorpay_order_id = ?, payment_status = 'pending' WHERE bill_id = ?`,
+      [order.id, billId]
+    );
+
+    // Keep the payments table record for tracking history
     await db.query(
       `INSERT INTO payments (bill_id, order_id, amount, currency, status)
        VALUES (?, ?, ?, 'INR', 'created')`,
@@ -67,8 +73,118 @@ router.post('/create-order', authMiddleware, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /api/payment/verify-payment
-// Verifies HMAC signature from Razorpay and marks bill as paid
+// POST /api/payment/create-qr
+// New endpoint for dynamic QR generation
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/create-qr', authMiddleware, async (req, res) => {
+  try {
+    const { billId } = req.body;
+
+    if (!billId) {
+      return res.status(400).json({ message: 'billId is required' });
+    }
+
+    const [bills] = await db.query(
+      'SELECT bill_id, total_amount FROM bills WHERE bill_id = ? AND user_id = ?',
+      [billId, req.user.userId]
+    );
+
+    if (!bills || bills.length === 0) {
+      return res.status(404).json({ message: 'Bill not found' });
+    }
+
+    const bill = bills[0];
+    const amount = bill.total_amount;
+    const amountInPaise = Math.round(amount * 100);
+
+    // 2. Create Razorpay order
+    const order = await razorpay.orders.create({
+      amount: amountInPaise,
+      currency: 'INR',
+      receipt: `bill_${billId}_qr_${Date.now()}`,
+      notes: { billId: String(billId) },
+    });
+
+    // 3. Update bill status to pending
+    await db.query(
+      `UPDATE bills SET payment_status = 'pending' WHERE bill_id = ?`,
+      [billId]
+    );
+
+    // 4. Record the payment attempt in the payments table (matches your new schema)
+    await db.query(
+      `INSERT INTO payments (bill_id, order_id, amount, status) VALUES (?, ?, ?, 'created')`,
+      [billId, order.id, amount]
+    );
+
+    res.json({
+      order_id: order.id,
+      amount: amount,
+      upi_link: `upi://pay?pa=${process.env.RAZORPAY_KEY_ID}@razorpay&pn=PhotoBilling&am=${amount}&cu=INR&tr=${order.id}`,
+    });
+  } catch (err) {
+    console.error('Create QR error:', err);
+    res.status(500).json({ message: 'Failed to create QR payment', error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/payment/webhook
+// Updated to work with the new schema (Order ID is in payments table)
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/webhook', async (req, res) => {
+  const secret = process.env.RAZORPAY_WEBHOOK_SECRET || 'your_default_secret';
+  const signature = req.headers['x-razorpay-signature'];
+
+  try {
+    const hmac = crypto.createHmac('sha256', secret);
+    hmac.update(JSON.stringify(req.body));
+    const digest = hmac.digest('hex');
+
+    if (signature !== digest) {
+      return res.status(400).send('Invalid signature');
+    }
+
+    const event = req.body.event;
+    if (event === 'payment.captured' || event === 'order.paid') {
+      const orderId = req.body.payload.payment.entity.order_id;
+      const paymentId = req.body.payload.payment.entity.id;
+
+      // 1. Find the bill_id associated with this order_id from the payments table
+      const [payments] = await db.query(
+        'SELECT bill_id FROM payments WHERE order_id = ?',
+        [orderId]
+      );
+
+      if (payments.length > 0) {
+        const billId = payments[0].bill_id;
+
+        // 2. Update bill to paid online
+        await db.query(
+          `UPDATE bills SET payment_status = 'paid', payment_mode = 'online'
+           WHERE bill_id = ?`,
+          [billId]
+        );
+        
+        // 3. Update the payments tracking table
+        await db.query(
+          `UPDATE payments SET status = 'paid', payment_id = ? WHERE order_id = ?`,
+          [paymentId, orderId]
+        );
+
+        console.log(`✅ Webhook confirmed payment for Bill: ${billId}`);
+      }
+    }
+
+    res.status(200).send('ok');
+  } catch (err) {
+    console.error('Webhook error:', err);
+    res.status(500).send('Internal Error');
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/payment/verify-payment (Legacy Support)
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/verify-payment', authMiddleware, async (req, res) => {
   try {
@@ -78,7 +194,6 @@ router.post('/verify-payment', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Missing required payment verification fields' });
     }
 
-    // Verify signature using HMAC-SHA256
     const body = `${razorpay_order_id}|${razorpay_payment_id}`;
     const expectedSignature = crypto
       .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
@@ -86,35 +201,27 @@ router.post('/verify-payment', authMiddleware, async (req, res) => {
       .digest('hex');
 
     if (expectedSignature !== razorpay_signature) {
-      console.warn(`⚠️  Payment signature mismatch for bill ${billId}`);
-
-      // Mark payment record as failed
       await db.query(
         `UPDATE payments SET status = 'failed', payment_id = ? WHERE order_id = ?`,
         [razorpay_payment_id, razorpay_order_id]
       );
-
-      return res.status(400).json({ message: 'Payment verification failed: Invalid signature' });
+      return res.status(400).json({ message: 'Signature mismatch' });
     }
 
-    // Signature valid — mark bill as paid and online
     await db.query(
-      `UPDATE bills SET payment_status = 'paid', payment_mode = 'online' WHERE bill_id = ? AND user_id = ?`,
-      [billId, req.user.userId]
+      `UPDATE bills SET payment_status = 'paid', payment_mode = 'online' WHERE bill_id = ?`,
+      [billId]
     );
 
-    // Update payment record
     await db.query(
       `UPDATE payments SET status = 'paid', payment_id = ? WHERE order_id = ?`,
       [razorpay_payment_id, razorpay_order_id]
     );
 
-    console.log(`✅ Payment verified for bill ${billId}, payment ID: ${razorpay_payment_id}`);
-
-    res.json({ success: true, message: 'Payment verified and bill marked as paid online' });
+    res.json({ success: true });
   } catch (err) {
-    console.error('Verify payment error:', err);
-    res.status(500).json({ message: 'Internal server error during payment verification' });
+    console.error('Verify error:', err);
+    res.status(500).send('Error');
   }
 });
 
@@ -140,158 +247,6 @@ router.post('/mark-as-cash', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('Mark as cash error:', err);
     res.status(500).json({ message: 'Failed to update payment status' });
-  }
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GET /api/payment/checkout/:orderId
-// Serves a self-contained Razorpay web checkout HTML page.
-// This is the Expo Go-compatible approach (no native SDK needed).
-// After payment, Razorpay calls the callback URL to return payment details.
-// ─────────────────────────────────────────────────────────────────────────────
-router.get('/checkout/:orderId', async (req, res) => {
-  try {
-    const { orderId } = req.params;
-    const { amount, billId, name, description, callbackUrl } = req.query;
-
-    if (!orderId || !amount || !billId) {
-      return res.status(400).send('<h2>Invalid checkout parameters</h2>');
-    }
-
-    const keyId = process.env.RAZORPAY_KEY_ID;
-
-    // Serve a minimal Razorpay checkout page that auto-opens the payment modal
-    const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Payment - Photo Billing</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #0f0f1a;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      color: #fff;
-    }
-    .card {
-      background: #1a1a2e;
-      border: 1px solid rgba(100,100,255,0.2);
-      border-radius: 16px;
-      padding: 40px 32px;
-      text-align: center;
-      max-width: 360px;
-      width: 90%;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-    }
-    .logo { font-size: 48px; margin-bottom: 16px; }
-    h1 { font-size: 20px; margin-bottom: 8px; color: #e0e0ff; }
-    .amount {
-      font-size: 36px;
-      font-weight: 700;
-      color: #7c6aff;
-      margin: 16px 0;
-    }
-    .desc { font-size: 14px; color: #888; margin-bottom: 28px; }
-    .btn {
-      background: linear-gradient(135deg, #7c6aff, #5c4fff);
-      color: #fff;
-      border: none;
-      border-radius: 10px;
-      padding: 14px 32px;
-      font-size: 16px;
-      font-weight: 600;
-      cursor: pointer;
-      width: 100%;
-      transition: opacity 0.2s;
-    }
-    .btn:hover { opacity: 0.9; }
-    .secure { font-size: 12px; color: #555; margin-top: 16px; }
-    #status { margin-top: 20px; font-size: 15px; }
-    .success { color: #4caf50; font-weight: 600; }
-    .error { color: #f44336; font-weight: 600; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="logo">💳</div>
-    <h1>${name || 'Photo Billing'}</h1>
-    <div class="amount">₹${(parseInt(amount) / 100).toFixed(2)}</div>
-    <p class="desc">${description || 'Complete your payment securely'}</p>
-    <button class="btn" id="payBtn" onclick="openCheckout()">Pay Now</button>
-    <p class="secure">🔒 Secured by Razorpay</p>
-    <div id="status"></div>
-  </div>
-
-  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-  <script>
-    function openCheckout() {
-      document.getElementById('payBtn').disabled = true;
-      document.getElementById('payBtn').textContent = 'Opening...';
-
-      var options = {
-        key: "${keyId}",
-        amount: "${amount}",
-        currency: "INR",
-        name: "${name || 'Photo Billing'}",
-        description: "${description || 'Bill Payment'}",
-        order_id: "${orderId}",
-        handler: function(response) {
-          // Payment success - redirect back to app with payment details
-          var successUrl = "${callbackUrl || ''}"
-            + "?razorpay_order_id=" + response.razorpay_order_id
-            + "&razorpay_payment_id=" + response.razorpay_payment_id
-            + "&razorpay_signature=" + response.razorpay_signature
-            + "&billId=${billId}"
-            + "&status=success";
-
-          document.getElementById('status').innerHTML = '<p class="success">✅ Payment Successful! Returning to app...</p>' +
-            '<p style="margin-top:20px; font-size:14px; color:#888;">If you are not redirected, <a href="' + successUrl + '" style="color:#7c6aff; text-decoration:none; font-weight:600;">click here</a></p>';
-          document.getElementById('payBtn').style.display = 'none';
-
-          // Use window.location for deep link redirect
-          setTimeout(function() {
-            window.location.href = successUrl;
-          }, 500);
-        },
-        modal: {
-          ondismiss: function() {
-            document.getElementById('payBtn').disabled = false;
-            document.getElementById('payBtn').textContent = 'Pay Now';
-            document.getElementById('status').innerHTML = '<p class="error">Payment cancelled. Try again.</p>';
-          }
-        },
-        theme: { color: "#7c6aff" }
-      };
-
-      var rzp = new Razorpay(options);
-
-      rzp.on('payment.failed', function(response) {
-        var failUrl = "${callbackUrl || ''}"
-          + "?status=failed"
-          + "&error=" + encodeURIComponent(response.error.description)
-          + "&billId=${billId}";
-        document.getElementById('status').innerHTML = '<p class="error">❌ Payment Failed. Returning to app...</p>';
-        setTimeout(function() { window.location.href = failUrl; }, 1000);
-      });
-
-      rzp.open();
-    }
-
-    // Auto-open on load for smoother UX
-    window.onload = function() { setTimeout(openCheckout, 500); };
-  </script>
-</body>
-</html>`;
-
-    res.send(html);
-  } catch (err) {
-    console.error('Checkout page error:', err);
-    res.status(500).send('<h2>Something went wrong. Please go back to the app.</h2>');
   }
 });
 

@@ -142,4 +142,26 @@ router.post('/upload', upload.single('image'), async (req, res) => {
   }
 });
 
+// GET /api/bills/:billId - Get single bill status (used for polling)
+router.get('/:billId', async (req, res) => {
+  try {
+    const billId = parseInt(req.params.billId, 10);
+    const [rows] = await require('../config/db').query(
+      `SELECT bill_id, total_amount, payment_status, payment_mode
+       FROM bills
+       WHERE bill_id = ? AND user_id = ?`,
+      [billId, req.user.userId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Bill not found' });
+    }
+
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('Get bill status error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 module.exports = router;

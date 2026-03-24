@@ -2,10 +2,11 @@ import { getToken } from '@/backend/src/utils/storage';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
@@ -33,10 +34,38 @@ export default function BillPreviewScreen() {
   const colors = Colors[colorScheme ?? 'light'];
 
   // ── Payment state ──────────────────────────────────────────────────────────
-  const [paymentStatus, setPaymentStatus] = useState<'idle' | 'loading' | 'paid' | 'failed'>('idle');
+  const [paymentStatus, setPaymentStatus] = useState<'idle' | 'loading' | 'qr_generated' | 'paid' | 'failed'>('idle');
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [upiLink, setUpiLink] = useState<string | null>(null);
 
   const bill = useMemo(() => bills.find((b) => b.id === id), [bills, id]);
+
+  // Polling for payment status
+  useEffect(() => {
+    if (paymentStatus !== 'qr_generated' || !bill?.id) return;
+
+    let timer: any;
+    const checkStatus = async () => {
+      try {
+        const token = await getToken();
+        // Check if the bill status has changed in the database
+        const res = await fetch(`${API_URL}/api/bills/${bill.id}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.payment_status === 'paid') {
+            setPaymentStatus('paid');
+          }
+        }
+      } catch (e) {
+        console.warn('Poll error:', e);
+      }
+    };
+
+    timer = setInterval(checkStatus, 5000);
+    return () => clearInterval(timer);
+  }, [paymentStatus, bill?.id]);
 
   const handleDone = async () => {
     // If not paid online, mark as cash payment in DB
@@ -68,81 +97,24 @@ export default function BillPreviewScreen() {
     setPaymentError(null);
 
     try {
-      // Step 1: Create Razorpay order on backend
-      const orderRes = await fetch(`${API_URL}/api/payment/create-order`, {
+      // Step 1: Create UPI QR on backend
+      const res = await fetch(`${API_URL}/api/payment/create-qr`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          amount: bill.total,
-          billId: bill.id,
-        }),
+        body: JSON.stringify({ billId: bill.id }),
       });
 
-      if (!orderRes.ok) {
-        const errData = await orderRes.json();
-        throw new Error(errData.message || 'Failed to create payment order');
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.message || 'Failed to generate QR');
       }
 
-      const { order_id, amount } = await orderRes.json();
-
-      // Step 2: Build callback URL (deep link back to app)
-      // Linking.createURL handles Expo Go specifically
-      const callbackScheme = Linking.createURL('/payment-callback');
-
-      // Step 3: Open Razorpay web checkout in browser
-      const checkoutUrl =
-        `${API_URL}/api/payment/checkout/${order_id}` +
-        `?amount=${amount}` +
-        `&billId=${bill.id}` +
-        `&name=Photo+Billing` +
-        `&description=Bill+%23${bill.id}` +
-        `&callbackUrl=${encodeURIComponent(callbackScheme)}`;
-
-      const result = await WebBrowser.openAuthSessionAsync(checkoutUrl, callbackScheme);
-
-      // Step 4: Handle result from web checkout
-      if (result.type === 'success' && result.url) {
-        const parsed = new URL(result.url);
-        const status = parsed.searchParams.get('status');
-
-        if (status === 'success') {
-          const razorpay_order_id = parsed.searchParams.get('razorpay_order_id');
-          const razorpay_payment_id = parsed.searchParams.get('razorpay_payment_id');
-          const razorpay_signature = parsed.searchParams.get('razorpay_signature');
-
-          // Step 5: Verify payment on backend
-          const verifyRes = await fetch(`${API_URL}/api/payment/verify-payment`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              razorpay_order_id,
-              razorpay_payment_id,
-              razorpay_signature,
-              billId: bill.id,
-            }),
-          });
-
-          if (verifyRes.ok) {
-            setPaymentStatus('paid');
-          } else {
-            const errData = await verifyRes.json();
-            throw new Error(errData.message || 'Payment verification failed');
-          }
-        } else {
-          const error = parsed.searchParams.get('error') || 'Payment failed';
-          throw new Error(decodeURIComponent(error));
-        }
-      } else if (result.type === 'cancel' || result.type === 'dismiss') {
-        // User closed the browser without paying
-        setPaymentStatus('idle');
-        setPaymentError('Payment was cancelled.');
-      }
+      const { upi_link } = await res.json();
+      setUpiLink(upi_link);
+      setPaymentStatus('qr_generated');
     } catch (err: any) {
       console.error('Payment error:', err);
       setPaymentStatus('failed');
@@ -167,6 +139,7 @@ export default function BillPreviewScreen() {
   const date = new Date(bill.createdAt).toLocaleString();
   const isPaid = paymentStatus === 'paid';
   const isLoading = paymentStatus === 'loading';
+  const showQr = paymentStatus === 'qr_generated' && upiLink;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -227,27 +200,49 @@ export default function BillPreviewScreen() {
               </View>
             )}
 
-            {/* ── Pay Now Button ── */}
-            <TouchableOpacity
-              style={[
-                styles.payBtn,
-                { backgroundColor: isLoading ? colors.icon : '#7c6aff' },
-              ]}
-              onPress={handlePayment}
-              disabled={isLoading}
-              activeOpacity={0.85}
-            >
-              {isLoading ? (
-                <View style={styles.payBtnInner}>
-                  <ActivityIndicator color="#fff" size="small" />
-                  <ThemedText style={styles.payBtnText}>Processing...</ThemedText>
+            {showQr && (
+              <ThemedView style={styles.qrContainer}>
+                <ThemedText type="defaultSemiBold" style={styles.qrTitle}>Scan to Pay UPI</ThemedText>
+                {/* 
+                  Using an external QR API because no local library is installed.
+                  In production, you'd use 'react-native-qrcode-svg'.
+                */}
+                <View style={styles.qrWrapper}>
+                  <Image
+                    source={{ uri: `https://quickchart.io/qr?text=${encodeURIComponent(upiLink)}&size=250` }}
+                    style={{ width: 200, height: 200 }}
+                  />
                 </View>
-              ) : (
-                <ThemedText style={styles.payBtnText}>
-                  💳 Pay ₹{bill.total.toFixed(2)}
-                </ThemedText>
-              )}
-            </TouchableOpacity>
+                <ThemedText style={styles.qrLink}>{upiLink}</ThemedText>
+                <View style={styles.pollingStatus}>
+                  <ActivityIndicator size="small" color={colors.tint} />
+                  <ThemedText style={styles.pollingText}>Waiting for payment confirmation...</ThemedText>
+                </View>
+              </ThemedView>
+            )}
+
+            {!showQr && (
+              <TouchableOpacity
+                style={[
+                  styles.payBtn,
+                  { backgroundColor: isLoading ? colors.icon : '#7c6aff' },
+                ]}
+                onPress={handlePayment}
+                disabled={isLoading}
+                activeOpacity={0.85}
+              >
+                {isLoading ? (
+                  <View style={styles.payBtnInner}>
+                    <ActivityIndicator color="#fff" size="small" />
+                    <ThemedText style={styles.payBtnText}>Generating QR...</ThemedText>
+                  </View>
+                ) : (
+                  <ThemedText style={styles.payBtnText}>
+                    ⚡ Generate Payment QR
+                  </ThemedText>
+                )}
+              </TouchableOpacity>
+            )}
 
             <ThemedText style={styles.secureNote}>🔒 Secured by Razorpay</ThemedText>
           </>
@@ -384,5 +379,40 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: '700',
+  },
+  // ── QR UI Styles ──
+  qrContainer: {
+    padding: 24,
+    borderRadius: 16,
+    backgroundColor: 'rgba(128,128,128,0.05)',
+    alignItems: 'center',
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(128,128,128,0.1)',
+  },
+  qrTitle: {
+    fontSize: 18,
+    marginBottom: 16,
+  },
+  qrWrapper: {
+    backgroundColor: '#fff',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  qrLink: {
+    fontSize: 11,
+    opacity: 0.4,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  pollingStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  pollingText: {
+    fontSize: 13,
+    opacity: 0.7,
   },
 });
