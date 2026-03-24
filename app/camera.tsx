@@ -76,21 +76,40 @@ export default function CameraScreen() {
   const confirmImage = useCallback(async () => {
     if (!capturedUri) return;
     setUploading(true);
-    try {
-      // Single call: upload image AND run YOLO detection
-      const { detected, path } = await detectProductsFromImage(capturedUri);
-      setPendingBillItems(detected);
-      setPendingImagePath(path ?? null);
-    } catch (e) {
-      const message = e && typeof e === 'object' && 'message' in e
-        ? String((e as { message: string }).message)
-        : 'Detection failed';
-      Alert.alert('Detection failed', message);
-      setUploading(false);
-      return;
+    
+    let attempt = 0;
+    const maxAttempts = 2; // Retry once on network failure
+    
+    while (attempt < maxAttempts) {
+      try {
+        // Single call: upload image AND run YOLO detection
+        const { detected, path } = await detectProductsFromImage(capturedUri);
+        setPendingBillItems(detected);
+        setPendingImagePath(path ?? null);
+        
+        // Success
+        setUploading(false);
+        router.replace('/bill-edit' as const);
+        return;
+      } catch (e) {
+        attempt++;
+        const message = e && typeof e === 'object' && 'message' in e
+          ? String((e as { message: string }).message)
+          : 'Detection failed';
+          
+        // If it's a network request failure and we have attempts left, retry
+        if (attempt < maxAttempts && message.toLowerCase().includes('network request failed')) {
+          console.log(`Network request failed, retrying (attempt ${attempt + 1})...`);
+          await new Promise(resolve => setTimeout(resolve, 500)); // short delay before retry
+          continue;
+        }
+        
+        // Error on final attempt or non-network error
+        Alert.alert('Detection failed', message);
+        setUploading(false);
+        return;
+      }
     }
-    setUploading(false);
-    router.replace('/bill-edit' as const);
   }, [capturedUri, setPendingBillItems, setPendingImagePath, router]);
 
   const retake = useCallback(() => {
