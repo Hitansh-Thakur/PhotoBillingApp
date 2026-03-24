@@ -3,6 +3,7 @@
  * Print is implemented via Expo Print (if available) or a formatted Alert on native.
  */
 import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -88,6 +89,7 @@ export function BillDetailModal({ billId, billDate, billTotal, paymentMode, visi
 <body>
   <h1>Bill #${billId}</h1>
   <p class="meta">Date: ${billDate} &nbsp;|&nbsp; Total: ₹${billTotal.toFixed(2)}</p>
+  <p class="meta">Payment Mode: ${paymentMode}</p>
   <table>
     <thead>
       <tr>
@@ -131,6 +133,36 @@ export function BillDetailModal({ billId, billDate, billTotal, paymentMode, visi
       Alert.alert('Print Error', msg);
     }
   }, [buildHtml]);
+
+  const handleShare = useCallback(async () => {
+    if (Platform.OS === 'web') {
+      Alert.alert('Not Supported', 'Sharing is not supported on web. Use the print option instead.');
+      return;
+    }
+
+    try {
+      // First generate the PDF file
+      const { uri } = await Print.printToFileAsync({ html: buildHtml() });
+      
+      // Check if sharing is available
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (isAvailable) {
+        await Sharing.shareAsync(uri, {
+          mimeType: 'application/pdf',
+          dialogTitle: `Share Bill #${billId}`,
+          UTI: 'com.adobe.pdf',
+        });
+      } else {
+        Alert.alert('Error', 'Sharing is not available on this device');
+      }
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === 'object' && 'message' in e
+          ? String((e as { message: unknown }).message)
+          : 'Could not share the bill';
+      Alert.alert('Share Error', msg);
+    }
+  }, [buildHtml, billId]);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -191,14 +223,24 @@ export function BillDetailModal({ billId, billDate, billTotal, paymentMode, visi
             </ScrollView>
           )}
 
-          {/* Print button */}
-          <TouchableOpacity
-            style={[styles.printBtn, { backgroundColor: colors.tint }]}
-            onPress={handlePrint}
-            disabled={loading || items.length === 0}
-          >
-            <ThemedText style={styles.printBtnText}>🖨  Print Bill</ThemedText>
-          </TouchableOpacity>
+          {/* Action buttons */}
+          <View style={styles.footerBtns}>
+            <TouchableOpacity
+              style={[styles.actionBtn, { backgroundColor: colors.tint, flex: 1.2 }]}
+              onPress={handlePrint}
+              disabled={loading || items.length === 0}
+            >
+              <ThemedText style={styles.actionBtnText}>🖨  Print Bill</ThemedText>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.actionBtn, { backgroundColor: '#25D366', flex: 1 }]}
+              onPress={handleShare}
+              disabled={loading || items.length === 0}
+            >
+              <ThemedText style={styles.actionBtnText}>📤  Share</ThemedText>
+            </TouchableOpacity>
+          </View>
         </ThemedView>
       </View>
     </Modal>
@@ -307,13 +349,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  printBtn: {
+  footerBtns: {
+    flexDirection: 'row',
+    gap: 12,
     margin: 20,
+    marginTop: 10,
+  },
+  actionBtn: {
     paddingVertical: 15,
     borderRadius: 12,
     alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
   },
-  printBtnText: {
+  actionBtnText: {
     color: '#fff',
     fontWeight: '700',
     fontSize: 16,

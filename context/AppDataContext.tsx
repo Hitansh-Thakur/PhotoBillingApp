@@ -74,6 +74,7 @@ interface AppDataContextValue extends AppData {
   addProduct: (product: Omit<Product, 'id'> & { buyingPrice?: number; barcode?: string }) => Promise<void>;
   updateProfile: (updates: Partial<Profile>) => Promise<void>;
   clearPendingBill: () => void;
+  deleteProduct: (productId: string, reflectInCashout: boolean) => Promise<void>;
   refreshProducts: () => Promise<void>;
   refreshBills: () => Promise<void>;
 }
@@ -266,6 +267,32 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     }));
   }, []);
 
+  const deleteProduct = useCallback(async (productId: string, reflectInCashout: boolean) => {
+    const id = parseInt(productId, 10);
+    if (Number.isNaN(id)) return;
+
+    if (reflectInCashout) {
+      const product = data.inventory.find(p => p.id === productId);
+      if (product) {
+        const cost = (product.price - product.buyingPrice || 0) * product.quantity;
+        if (cost > 0) {
+          await api.post('/api/cashflow', {
+            type: 'expense',
+            amount: cost,
+            description: `Inventory cost for ${product.name} (DELETED)`,
+          });
+        }
+      }
+    }
+
+    await api.delete(`/api/products/${id}`);
+    setData((prev) => ({
+      ...prev,
+      inventory: prev.inventory.filter((p) => p.id !== productId),
+    }));
+    bumpAnalytics();
+  }, [data.inventory, bumpAnalytics]);
+
   const LOW_STOCK_THRESHOLD = 5;
 
   const lowStockProducts = data.inventory.filter(
@@ -320,6 +347,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     addBill,
     updateInventory,
     addProduct,
+    deleteProduct,
     updateProfile,
     clearPendingBill,
     refreshProducts,

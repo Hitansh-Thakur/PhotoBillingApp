@@ -22,7 +22,44 @@ import type { Product } from '@/types';
 const LOW_STOCK_THRESHOLD = 5;
 
 export default function InventoryScreen() {
-  const { inventory, updateInventory, addProduct, loading, refreshProducts } = useAppData();
+  const { inventory, updateInventory, addProduct, deleteProduct, loading, refreshProducts } = useAppData();
+
+  const handleDelete = (p: Product) => {
+    Alert.alert(
+      'Delete Product',
+      `Are you sure you want to delete ${p.name}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Delete', 
+          style: 'destructive',
+          onPress: () => {
+             Alert.alert(
+               'Reflect in Cashout?',
+               'Should this inventory\'s cost be reflected in cashout as an expense?',
+               [
+                 { text: 'No', onPress: async () => {
+                   try {
+                     await deleteProduct(p.id, false);
+                   } catch (err: any) {
+                     Alert.alert('Error', err.message || 'Failed to delete product');
+                   }
+                 }},
+                 { text: 'Yes', onPress: async () => {
+                   try {
+                     await deleteProduct(p.id, true);
+                   } catch (err: any) {
+                     Alert.alert('Error', err.message || 'Failed to delete product');
+                   }
+                 }}
+               ],
+               { cancelable: true }
+             );
+          }
+        }
+      ]
+    );
+  };
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editQty, setEditQty] = useState('');
@@ -38,7 +75,10 @@ export default function InventoryScreen() {
   const [newQty, setNewQty] = useState('');
   const [newBarcode, setNewBarcode] = useState('');
   const [addError, setAddError] = useState('');
-  const [scannerMode, setScannerMode] = useState<'add' | 'edit' | null>(null);
+  const [scannerMode, setScannerMode] = useState<'add' | 'edit' | 'top_scan' | null>(null);
+  const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
 
@@ -115,19 +155,54 @@ export default function InventoryScreen() {
       return;
     }
     // Check for duplicate product name (case-insensitive)
-    const isDuplicate = inventory.some(
+    const existingProduct = inventory.find(
       (p) => p.name.trim().toLowerCase() === name.toLowerCase()
     );
-    if (isDuplicate) {
-      setAddError('Product already exists');
-      return;
-    }
+
     // Validate quantity
     if (isNaN(qtyRaw) || qtyRaw <= 0) {
       setAddError('Quantity must be greater than 0');
       return;
     }
 
+    if (existingProduct) {
+      setAdding(true);
+      try {
+        const totalQty = existingProduct.quantity + qtyRaw;
+        const avgPrice = price 
+          ? (existingProduct.quantity * existingProduct.price + qtyRaw * price) / totalQty
+          : existingProduct.price;
+        
+        const currentBuyingPrice = existingProduct.buyingPrice || 0;
+        const avgBuyingPrice = buyingPrice 
+          ? (existingProduct.quantity * currentBuyingPrice + qtyRaw * buyingPrice) / totalQty
+          : currentBuyingPrice;
+
+        await updateInventory(existingProduct.id, {
+          name: existingProduct.name,
+          quantity: totalQty,
+          price: avgPrice,
+          buyingPrice: avgBuyingPrice,
+          barcode: newBarcode.trim() || existingProduct.barcode
+        });
+        setNewName('');
+        setNewPrice('');
+        setNewBuyingPrice('');
+        setNewQty('');
+        setNewBarcode('');
+        setAddModalVisible(false);
+        setAddError('');
+        return;
+      } catch (err: unknown) {
+        const message = err && typeof err === 'object' && 'message' in err
+          ? String((err as { message: unknown }).message)
+          : 'Failed to update existing product';
+        setAddError(message);
+        setAdding(false);
+        return;
+      }
+    }
+    
     setAddError('');
     const quantity = qtyRaw;
     const barcode = newBarcode.trim() || undefined;
@@ -157,6 +232,30 @@ export default function InventoryScreen() {
     } finally {
       setAdding(false);
     }
+  };
+
+  const selectProduct = (p: Product) => {
+    setNewName(p.name);
+    setNewPrice(String(p.price));
+    setNewBuyingPrice(String(p.buyingPrice ?? 0));
+    setNewBarcode(p.barcode || '');
+    setShowSuggestions(false);
+    setAddError('');
+  };
+
+  const handleProductNameChange = (text: string) => {
+    setNewName(text);
+    if (text.trim().length > 0) {
+      const suggested = inventory.filter(p => 
+        p.name.toLowerCase().includes(text.toLowerCase())
+      );
+      setFilteredProducts(suggested);
+      setShowSuggestions(true);
+    } else {
+      setFilteredProducts([]);
+      setShowSuggestions(false);
+    }
+    setAddError('');
   };
 
   if (loading) {
@@ -285,11 +384,21 @@ export default function InventoryScreen() {
                 <ThemedText style={styles.value}>
                   Value: ₹{(p.quantity * p.price).toFixed(2)}
                 </ThemedText>
-                <TouchableOpacity style={styles.editBtn} onPress={() => startEdit(p)}>
-                  <ThemedText style={[styles.editBtnText, { color: colors.tint }]}>
-                    Edit
-                  </ThemedText>
-                </TouchableOpacity>
+                <View style={styles.cardActions}>
+                  <TouchableOpacity style={styles.editBtn} onPress={() => startEdit(p)}>
+                    <ThemedText style={[styles.editBtnText, { color: colors.tint }]}>
+                      Edit
+                    </ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={styles.deleteBtn} 
+                    onPress={() => handleDelete(p)}
+                  >
+                    <ThemedText style={[styles.editBtnText, { color: '#ef4444' }]}>
+                      Delete
+                    </ThemedText>
+                  </TouchableOpacity>
+                </View>
               </>
             )}
           </View>
@@ -306,22 +415,42 @@ export default function InventoryScreen() {
       >
         <View style={styles.modalOverlay}>
           <ThemedView style={styles.modal}>
-            <ThemedText type="title" style={styles.modalTitle}>
-              Add Product
-            </ThemedText>
+            <View style={[styles.rowLayout, { justifyContent: 'space-between', marginBottom: 12 }]}>
+              <ThemedText type="title" style={{ fontSize: 20 }}>
+                Add Product
+              </ThemedText>
+              <TouchableOpacity onPress={() => {setScannerMode('top_scan'); setAddModalVisible(true);}} style={styles.topScanBtn}>
+                <ThemedText style={{ fontSize: 14, fontWeight: '600', color: colors.tint }}>Scan Barcode 📷</ThemedText>
+              </TouchableOpacity>
+            </View>
             {addError ? (
               <ThemedView style={styles.addErrorBox}>
                 <ThemedText style={styles.addErrorText}>⚠ {addError}</ThemedText>
               </ThemedView>
             ) : null}
-            <ThemedText style={styles.label}>Name</ThemedText>
-            <TextInput
-              style={[styles.input, styles.modalInput, { color: colors.text }]}
-              value={newName}
-              onChangeText={setNewName}
-              placeholder="Product name"
-              placeholderTextColor={colors.icon}
-            />
+            <View style={{ zIndex: 1000 }}>
+              <ThemedText style={styles.label}>Name</ThemedText>
+              <TextInput
+                style={[styles.input, styles.modalInput, { color: colors.text }]}
+                value={newName}
+                onChangeText={handleProductNameChange}
+                placeholder="Product name"
+                placeholderTextColor={colors.icon}
+                onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                autoFocus={scannerMode === null && addModalVisible}
+              />
+              {showSuggestions && filteredProducts.length > 0 && (
+                <View style={[styles.suggestionsContainer, { backgroundColor: colors.background, borderColor: colors.icon }]}>
+                  <ScrollView style={{ maxHeight: 200 }} keyboardShouldPersistTaps="handled">
+                    {filteredProducts.map((p) => (
+                      <TouchableOpacity key={p.id} style={styles.suggestionItem} onPress={() => selectProduct(p)}>
+                        <ThemedText>{p.name} (₹{p.price})</ThemedText>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+            </View>
             <ThemedText style={styles.label}>Selling Price (₹)</ThemedText>
             <TextInput
               style={[styles.input, styles.modalInput, { color: colors.text }]}
@@ -402,6 +531,13 @@ export default function InventoryScreen() {
                  Alert.alert('Barcode Exists', `Product "${existing.name}" already uses this barcode.`);
               }
               setEditBarcode(data);
+            } else if (scannerMode === 'top_scan') {
+              const existing = inventory.find(p => p.barcode === data);
+              if (existing) {
+                selectProduct(existing);
+              } else {
+                setNewBarcode(data);
+              }
             }
             setScannerMode(null);
           }}
@@ -488,6 +624,14 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 12,
     flexWrap: 'wrap',
+  },
+  cardActions: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  deleteBtn: {
+    marginTop: 12,
+    alignSelf: 'flex-start',
   },
   inputGroup: {
     flex: 1,
@@ -579,5 +723,32 @@ const styles = StyleSheet.create({
   saveBtnText: {
     color: '#fff',
     fontWeight: '600',
+  },
+  topScanBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(128,128,128,0.3)',
+    backgroundColor: 'rgba(128,128,128,0.05)',
+  },
+  suggestionsContainer: {
+    position: 'absolute',
+    top: 70,
+    left: 0,
+    right: 0,
+    borderWidth: 1,
+    borderRadius: 8,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    zIndex: 2000,
+  },
+  suggestionItem: {
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(128,128,128,0.1)',
   },
 });
