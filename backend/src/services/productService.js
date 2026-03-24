@@ -2,7 +2,7 @@ const pool = require('../config/db');
 
 async function getAllProducts(userId) {
   const [rows] = await pool.query(
-    'SELECT product_id, name, price, buying_price, quantity, low_stock_threshold FROM products WHERE user_id = ? ORDER BY name',
+    'SELECT product_id, name, price, buying_price, quantity, low_stock_threshold, barcode FROM products WHERE user_id = ? ORDER BY name',
     [userId]
   );
   return rows.map(r => ({
@@ -12,12 +12,13 @@ async function getAllProducts(userId) {
     buying_price: r.buying_price != null ? parseFloat(r.buying_price) : null,
     quantity: r.quantity,
     low_stock_threshold: r.low_stock_threshold ?? 5,
+    barcode: r.barcode,
   }));
 }
 
 async function getProductById(id, userId) {
   const [rows] = await pool.query(
-    'SELECT product_id, name, price, buying_price, quantity, low_stock_threshold FROM products WHERE product_id = ? AND user_id = ?',
+    'SELECT product_id, name, price, buying_price, quantity, low_stock_threshold, barcode FROM products WHERE product_id = ? AND user_id = ?',
     [id, userId]
   );
   if (rows.length === 0) return null;
@@ -29,6 +30,7 @@ async function getProductById(id, userId) {
     buying_price: r.buying_price != null ? parseFloat(r.buying_price) : null,
     quantity: r.quantity,
     low_stock_threshold: r.low_stock_threshold ?? 5,
+    barcode: r.barcode,
   };
 }
 
@@ -36,7 +38,7 @@ async function getProductById(id, userId) {
  * Create a product and automatically record an expense for the total buying cost.
  * Expense = buyingPrice × quantity  (falls back to selling price if no buying price)
  */
-async function createProduct({ name, price, buying_price, quantity, low_stock_threshold, userId }) {
+async function createProduct({ name, price, buying_price, quantity, low_stock_threshold, barcode, userId }) {
   const sellingPrice = parseFloat(price);
   const buyingPrice = buying_price != null ? parseFloat(buying_price) : sellingPrice;
   const qty = parseInt(quantity, 10) || 0;
@@ -58,8 +60,8 @@ async function createProduct({ name, price, buying_price, quantity, low_stock_th
     await connection.beginTransaction();
 
     const [result] = await connection.query(
-      'INSERT INTO products (name, price, buying_price, quantity, low_stock_threshold, user_id) VALUES (?, ?, ?, ?, ?, ?)',
-      [name, sellingPrice, buyingPrice, qty, threshold, userId]
+      'INSERT INTO products (name, price, buying_price, quantity, low_stock_threshold, barcode, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [name, sellingPrice, buyingPrice, qty, threshold, barcode ?? null, userId]
     );
     const productId = result.insertId;
 
@@ -81,6 +83,7 @@ async function createProduct({ name, price, buying_price, quantity, low_stock_th
       buying_price: buyingPrice,
       quantity: qty,
       low_stock_threshold: threshold,
+      barcode: barcode ?? null,
     };
   } catch (err) {
     await connection.rollback();
@@ -95,7 +98,7 @@ async function createProduct({ name, price, buying_price, quantity, low_stock_th
  *   - qty increased → record expense for newly added units (buyingPrice × diff)
  *   - qty decreased → record income for removed units (buyingPrice × diff)
  */
-async function updateProduct(id, { name, price, buying_price, quantity, low_stock_threshold }, userId) {
+async function updateProduct(id, { name, price, buying_price, quantity, low_stock_threshold, barcode }, userId) {
   const current = await getProductById(id, userId);
   if (!current) return null;
 
@@ -107,6 +110,7 @@ async function updateProduct(id, { name, price, buying_price, quantity, low_stoc
   if (buying_price !== undefined) { updates.push('buying_price = ?'); values.push(parseFloat(buying_price)); }
   if (quantity !== undefined) { updates.push('quantity = ?'); values.push(parseInt(quantity, 10)); }
   if (low_stock_threshold !== undefined) { updates.push('low_stock_threshold = ?'); values.push(parseInt(low_stock_threshold, 10)); }
+  if (barcode !== undefined) { updates.push('barcode = ?'); values.push(barcode ? String(barcode) : null); }
 
   if (updates.length === 0) return current;
 

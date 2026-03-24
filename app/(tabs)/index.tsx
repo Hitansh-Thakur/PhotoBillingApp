@@ -48,30 +48,40 @@ export default function HomeScreen() {
           </View>
         )}
 
-        <TouchableOpacity
-          style={[styles.captureButton, { backgroundColor: colors.tint }]}
-          onPress={() => router.push('/camera' as const)}
-          activeOpacity={0.8}
-        >
-          <IconSymbol name="camera.fill" size={48} color="#fff" />
-          <ThemedText style={[styles.captureButtonText, { color: '#fff' }]}>
-            Capture Products
-          </ThemedText>
-          <ThemedText style={[styles.captureHint, { color: 'rgba(255,255,255,0.9)' }]}>
-            Take a photo of products to add to your bill
-          </ThemedText>
-        </TouchableOpacity>
+        <View style={styles.actionRow}>
+          <TouchableOpacity
+            style={[styles.captureButton, { backgroundColor: colors.tint }]}
+            onPress={() => router.push('/camera' as const)}
+            activeOpacity={0.8}
+          >
+            <IconSymbol name="camera.fill" size={36} color="#fff" />
+            <ThemedText style={[styles.captureButtonText, { color: '#fff' }]}>
+              Capture Products
+            </ThemedText>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.captureButton, { backgroundColor: '#7c3aed' }]}
+            onPress={() => router.push('/barcode-scanner' as const)}
+            activeOpacity={0.8}
+          >
+            <IconSymbol name="qrcode.viewfinder" size={36} color="#fff" />
+            <ThemedText style={[styles.captureButtonText, { color: '#fff' }]}>
+              Scan Barcode
+            </ThemedText>
+          </TouchableOpacity>
+        </View>
 
         <ThemedView style={styles.infoBox}>
           <ThemedText type="defaultSemiBold">How it works</ThemedText>
           <ThemedText style={styles.infoText}>
-            1. Tap "Capture Products" and allow camera access
+            1. Tap "Capture Products" to photograph multiple products
           </ThemedText>
           <ThemedText style={styles.infoText}>
-            2. Take a photo — or upload from your gallery
+            2. Tap "Scan Barcode" to scan individual item barcodes
           </ThemedText>
           <ThemedText style={styles.infoText}>
-            3. Review and edit the detected items
+            3. Review and edit the detected/scanned items
           </ThemedText>
           <ThemedText style={styles.infoText}>
             4. Generate and print your bill
@@ -120,16 +130,23 @@ const styles = StyleSheet.create({
     color: '#a16207',
     opacity: 0.85,
   },
-  captureButton: {
-    borderRadius: 16,
-    padding: 32,
-    alignItems: 'center',
+  actionRow: {
+    flexDirection: 'row',
+    gap: 16,
     marginBottom: 24,
   },
+  captureButton: {
+    flex: 1,
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   captureButtonText: {
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: '700',
     marginTop: 12,
+    textAlign: 'center',
   },
   captureHint: {
     fontSize: 14,

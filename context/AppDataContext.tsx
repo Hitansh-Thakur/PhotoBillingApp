@@ -12,6 +12,7 @@ interface ApiProduct {
   price: number;
   buying_price: number;
   quantity: number;
+  barcode?: string;
 }
 
 /** Backend bill item shape */
@@ -39,6 +40,7 @@ function mapApiProduct(p: ApiProduct): Product {
     price: p.price,
     buyingPrice: p.buying_price ?? 0,
     quantity: p.quantity,
+    barcode: p.barcode,
   };
 }
 
@@ -66,8 +68,8 @@ interface AppDataContextValue extends AppData {
   setPendingBillItems: (items: BillItem[]) => void;
   setPendingImagePath: (path: string | null) => void;
   addBill: (items: BillItem[], total: number, imagePath?: string | null, source?: 'ai' | 'manual') => Promise<string | null>;
-  updateInventory: (productId: string, updates: Partial<Pick<Product, 'quantity' | 'price' | 'name' | 'buyingPrice'>>) => Promise<void>;
-  addProduct: (product: Omit<Product, 'id'> & { buyingPrice?: number }) => Promise<void>;
+  updateInventory: (productId: string, updates: Partial<Pick<Product, 'quantity' | 'price' | 'name' | 'buyingPrice' | 'barcode'>>) => Promise<void>;
+  addProduct: (product: Omit<Product, 'id'> & { buyingPrice?: number; barcode?: string }) => Promise<void>;
   updateProfile: (updates: Partial<Profile>) => Promise<void>;
   clearPendingBill: () => void;
   refreshProducts: () => Promise<void>;
@@ -227,7 +229,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   );
 
   const updateInventory = useCallback(
-    async (productId: string, updates: Partial<Pick<Product, 'quantity' | 'price' | 'name' | 'buyingPrice'>>) => {
+    async (productId: string, updates: Partial<Pick<Product, 'quantity' | 'price' | 'name' | 'buyingPrice' | 'barcode'>>) => {
       const id = parseInt(productId, 10);
       if (Number.isNaN(id)) return;
       const payload: Record<string, unknown> = {};
@@ -235,6 +237,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       if (updates.price !== undefined) payload.price = updates.price;
       if (updates.quantity !== undefined) payload.quantity = updates.quantity;
       if (updates.buyingPrice !== undefined) payload.buying_price = updates.buyingPrice;
+      if (updates.barcode !== undefined) payload.barcode = updates.barcode;
       const updated = await api.put<ApiProduct>(`/api/products/${id}`, payload);
       const mapped = mapApiProduct(updated);
       setData((prev) => ({
@@ -246,12 +249,13 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     [bumpAnalytics]
   );
 
-  const addProduct = useCallback(async (product: Omit<Product, 'id'> & { buyingPrice?: number }) => {
+  const addProduct = useCallback(async (product: Omit<Product, 'id'> & { buyingPrice?: number; barcode?: string }) => {
     const created = await api.post<ApiProduct>('/api/products', {
       name: product.name,
       price: product.price,
       buying_price: product.buyingPrice ?? 0,
       quantity: product.quantity ?? 0,
+      barcode: product.barcode,
     });
     const mapped = mapApiProduct(created);
     setData((prev) => ({

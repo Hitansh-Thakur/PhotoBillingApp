@@ -4,6 +4,7 @@ export interface Product {
   price: number;
   buyingPrice: number;
   quantity: number;
+  barcode?: string;
 }
 
 export interface BillItem {

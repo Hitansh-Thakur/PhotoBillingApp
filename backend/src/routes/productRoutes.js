@@ -64,6 +64,7 @@ router.post(
     body("buying_price").optional().isFloat({ min: 0 }).withMessage("Valid buying price required"),
     body("quantity").optional().isInt({ min: 0 }).withMessage("Quantity must be non-negative"),
     body("low_stock_threshold").optional().isInt({ min: 0 }),
+    body("barcode").optional().isString().trim(),
   ],
   handleValidationErrors,
   async (req, res) => {
@@ -118,6 +119,7 @@ router.put(
     body("buying_price").optional().isFloat({ min: 0 }),
     body("quantity").optional().isInt({ min: 0 }),
     body("low_stock_threshold").optional().isInt({ min: 0 }),
+    body("barcode").optional().isString().trim(),
   ],
   handleValidationErrors,
   async (req, res) => {
