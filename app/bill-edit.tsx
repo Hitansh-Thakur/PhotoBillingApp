@@ -18,13 +18,15 @@ import { Colors } from "@/constants/theme";
 import { useAppData } from "@/context/AppDataContext";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import type { BillItem } from "@/types";
+import { Picker } from "@react-native-picker/picker";
 
 export default function BillEditScreen() {
   const router = useRouter();
-  const { pendingBillItems, addBill, setPendingBillItems, pendingImagePath } = useAppData();
+  const { pendingBillItems, addBill, setPendingBillItems, pendingImagePath, inventory } = useAppData();
   const [items, setItems] = useState<BillItem[]>(() =>
     pendingBillItems.length > 0 ? pendingBillItems.map((i) => ({ ...i })) : [],
   );
+  const [selectedProductId, setSelectedProductId] = useState<string>("");
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? "light"];
 
@@ -32,6 +34,22 @@ export default function BillEditScreen() {
     () => items.reduce((sum, i) => sum + i.price * i.quantity, 0),
     [items],
   );
+
+  const addSelectedProduct = useCallback(() => {
+    if (!selectedProductId) return;
+    const product = inventory.find((p) => p.id === selectedProductId);
+    if (!product) return;
+    setItems((prev) => [
+      ...prev,
+      {
+        productId: product.id,
+        name: product.name,
+        quantity: 1,
+        price: product.price,
+      },
+    ]);
+    setSelectedProductId("");
+  }, [selectedProductId, inventory]);
 
   const updateItem = useCallback(
     (index: number, field: "quantity" | "price", value: string) => {
@@ -138,6 +156,34 @@ export default function BillEditScreen() {
               </TouchableOpacity>
             </View>
           ))}
+          {/* Manual Add Section */}
+          <View style={styles.pickerContainer}>
+            <ThemedText style={styles.label}>Select Product to Add from DB</ThemedText>
+            <View style={styles.pickerWrapper}>
+              <Picker
+                selectedValue={selectedProductId}
+                onValueChange={(itemValue) => setSelectedProductId(itemValue as string)}
+                style={{ color: colors.text }}
+                dropdownIconColor={colors.text}
+              >
+                <Picker.Item label="-- Choose product --" value="" color={colors.text} />
+                {inventory.map((p) => (
+                  <Picker.Item key={p.id} label={`${p.name} (₹${p.price.toFixed(2)})`} value={p.id} color={colors.text} />
+                ))}
+              </Picker>
+            </View>
+            <TouchableOpacity
+              onPress={addSelectedProduct}
+              style={[
+                styles.generateBtn,
+                !selectedProductId && { opacity: 0.5 },
+                { backgroundColor: colors.tint, marginTop: 12 },
+              ]}
+              disabled={!selectedProductId}
+            >
+              <ThemedText style={styles.generateBtnText}>+ Add to Bill</ThemedText>
+            </TouchableOpacity>
+          </View>
         </ScrollView>
 
         <View style={[styles.footer, { borderTopColor: colors.icon + "40" }]}>
@@ -224,6 +270,19 @@ const styles = StyleSheet.create({
   removeText: {
     fontSize: 18,
     opacity: 0.6,
+  },
+  pickerContainer: {
+    marginTop: 16,
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: "rgba(128,128,128,0.08)",
+  },
+  pickerWrapper: {
+    borderWidth: 1,
+    borderColor: "rgba(128,128,128,0.3)",
+    borderRadius: 8,
+    marginTop: 8,
+    overflow: "hidden",
   },
   footer: {
     padding: 24,
