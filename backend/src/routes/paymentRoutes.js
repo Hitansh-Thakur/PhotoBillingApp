@@ -97,9 +97,9 @@ router.post('/verify-payment', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Payment verification failed: Invalid signature' });
     }
 
-    // Signature valid — mark bill as paid
+    // Signature valid — mark bill as paid and online
     await db.query(
-      `UPDATE bills SET payment_status = 'paid' WHERE bill_id = ? AND user_id = ?`,
+      `UPDATE bills SET payment_status = 'paid', payment_mode = 'online' WHERE bill_id = ? AND user_id = ?`,
       [billId, req.user.userId]
     );
 
@@ -111,10 +111,35 @@ router.post('/verify-payment', authMiddleware, async (req, res) => {
 
     console.log(`✅ Payment verified for bill ${billId}, payment ID: ${razorpay_payment_id}`);
 
-    res.json({ success: true, message: 'Payment verified and bill marked as paid' });
+    res.json({ success: true, message: 'Payment verified and bill marked as paid online' });
   } catch (err) {
     console.error('Verify payment error:', err);
     res.status(500).json({ message: 'Internal server error during payment verification' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/payment/mark-as-cash
+// Marks a bill as paid via Cash
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/mark-as-cash', authMiddleware, async (req, res) => {
+  try {
+    const { billId } = req.body;
+
+    if (!billId) {
+      return res.status(400).json({ message: 'billId is required' });
+    }
+
+    await db.query(
+      `UPDATE bills SET payment_status = 'paid', payment_mode = 'cash' WHERE bill_id = ? AND user_id = ?`,
+      [billId, req.user.userId]
+    );
+
+    console.log(`✅ Bill ${billId} marked as paid via Cash`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Mark as cash error:', err);
+    res.status(500).json({ message: 'Failed to update payment status' });
   }
 });
 

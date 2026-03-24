@@ -28,6 +28,7 @@ interface ApiBill {
   bill_id: number;
   date: string;
   total_amount: number;
+  payment_mode?: 'online' | 'cash';
   image_path?: string | null;
   items: ApiBillItem[];
   created_at?: string;
@@ -54,6 +55,7 @@ function mapApiBill(b: ApiBill): Bill {
       quantity: i.quantity,
     })),
     total: b.total_amount,
+    paymentMode: b.payment_mode,
     createdAt: b.created_at ?? b.date,
   };
 }

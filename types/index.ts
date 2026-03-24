@@ -18,6 +18,7 @@ export interface Bill {
   id: string;
   items: BillItem[];
   total: number;
+  paymentMode?: 'online' | 'cash';
   createdAt: string;
 }
 

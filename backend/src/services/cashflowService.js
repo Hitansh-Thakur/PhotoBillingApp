@@ -53,10 +53,15 @@ async function getCashflowSummary(userId, startDate = null, endDate = null) {
 }
 
 async function getCashflowEntries(userId, limit = 100, type = null, startDate = null, endDate = null) {
-  let sql = 'SELECT entry_id, type, amount, date, description, bill_id, created_at FROM cashflow WHERE user_id = ?';
+  let sql = `
+    SELECT c.entry_id, c.type, c.amount, c.date, c.description, c.bill_id, c.created_at, b.payment_mode
+    FROM cashflow c
+    LEFT JOIN bills b ON c.bill_id = b.bill_id
+    WHERE c.user_id = ?
+  `;
   const params = [userId];
   if (startDate && endDate) {
-    sql += ' AND date BETWEEN ? AND ?';
+    sql += ' AND c.date BETWEEN ? AND ?';
     params.push(startDate, endDate);
   }
   if (type) {
@@ -73,7 +78,8 @@ async function getCashflowEntries(userId, limit = 100, type = null, startDate = 
     amount: parseFloat(r.amount),
     date: r.date,
     description: r.description,
-    bill_id: r.bill_id
+    bill_id: r.bill_id,
+    payment_mode: r.payment_mode
   }));
 }
 

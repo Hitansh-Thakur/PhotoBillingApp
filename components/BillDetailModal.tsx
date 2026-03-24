@@ -32,11 +32,12 @@ interface Props {
   billId: number | null;
   billDate: string;
   billTotal: number;
+  paymentMode?: 'online' | 'cash';
   visible: boolean;
   onClose: () => void;
 }
 
-export function BillDetailModal({ billId, billDate, billTotal, visible, onClose }: Props) {
+export function BillDetailModal({ billId, billDate, billTotal, paymentMode, visible, onClose }: Props) {
   const [items, setItems] = useState<BillItem[]>([]);
   const [loading, setLoading] = useState(false);
   const colorScheme = useColorScheme();
@@ -137,10 +138,17 @@ export function BillDetailModal({ billId, billDate, billTotal, visible, onClose 
         <ThemedView style={styles.sheet}>
           {/* Header */}
           <View style={styles.header}>
-            <View>
-              <ThemedText type="defaultSemiBold" style={styles.title}>
-                Bill #{billId}
-              </ThemedText>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <ThemedText type="defaultSemiBold" style={styles.title}>
+                  Bill #{billId}
+                </ThemedText>
+                {paymentMode && (
+                  <View style={[styles.badge, { backgroundColor: paymentMode === 'online' ? '#7c6aff' : '#f59e0b' }]}>
+                    <ThemedText style={styles.badgeText}>{paymentMode.toUpperCase()}</ThemedText>
+                  </View>
+                )}
+              </View>
               <ThemedText style={styles.date}>{billDate}</ThemedText>
             </View>
             <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
@@ -309,5 +317,15 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
     fontSize: 16,
+  },
+  badge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
   },
 });

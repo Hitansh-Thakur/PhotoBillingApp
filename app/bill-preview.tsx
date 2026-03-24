@@ -38,7 +38,23 @@ export default function BillPreviewScreen() {
 
   const bill = useMemo(() => bills.find((b) => b.id === id), [bills, id]);
 
-  const handleDone = () => {
+  const handleDone = async () => {
+    // If not paid online, mark as cash payment in DB
+    if (paymentStatus !== 'paid' && bill && bill.id) {
+      try {
+        const token = await getToken();
+        await fetch(`${API_URL}/api/payment/mark-as-cash`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ billId: bill.id }),
+        });
+      } catch (e) {
+        console.warn('Failed to mark as cash:', e);
+      }
+    }
     clearPendingBill();
     router.replace('/(tabs)');
   };
@@ -187,11 +203,18 @@ export default function BillPreviewScreen() {
         {/* ── Payment Status Section ── */}
         {isPaid ? (
           <View style={[styles.paymentBadge, { backgroundColor: '#16a34a22', borderColor: '#16a34a' }]}>
-            <ThemedText style={[styles.paymentBadgeText, { color: '#16a34a' }]}>
-              ✅ Payment Successful
-            </ThemedText>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <ThemedText style={[styles.paymentBadgeText, { color: '#16a34a' }]}>
+                ✅ Payment Successful
+              </ThemedText>
+              <View style={[styles.modeBadge, { backgroundColor: '#16a34a' }]}>
+                <ThemedText style={styles.modeBadgeText}>
+                  {(bill.paymentMode || 'online').toUpperCase()}
+                </ThemedText>
+              </View>
+            </View>
             <ThemedText style={styles.paymentBadgeHint}>
-              This bill has been marked as paid
+              This bill has been marked as paid via {bill.paymentMode || 'online'}
             </ThemedText>
           </View>
         ) : (
@@ -237,7 +260,7 @@ export default function BillPreviewScreen() {
         onPress={handleDone}
       >
         <ThemedText style={styles.doneBtnText}>
-          {isPaid ? 'Done' : 'Skip Payment'}
+          {isPaid ? 'Done' : 'Paid Cash'}
         </ThemedText>
       </TouchableOpacity>
     </SafeAreaView>
@@ -339,6 +362,16 @@ const styles = StyleSheet.create({
   paymentBadgeHint: {
     fontSize: 13,
     opacity: 0.8,
+  },
+  modeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  modeBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
   },
   // ── Done button ──
   doneBtn: {

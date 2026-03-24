@@ -38,6 +38,7 @@ interface CashflowEntry {
   date: string;
   description: string | null;
   bill_id: number | null;
+  payment_mode?: 'online' | 'cash';
 }
 
 interface BillItem {
@@ -52,6 +53,7 @@ interface BillDetails {
   bill_id: number;
   date: string;
   total_amount: number;
+  payment_mode?: 'online' | 'cash';
   items: BillItem[];
 }
 
@@ -121,7 +123,7 @@ export default function CashflowScreen() {
   );
 
   // Open bill details when user taps a "From Bill" entry
-  const handleViewBill = useCallback(async (billId: number) => {
+  const handleViewBill = useCallback(async (billId: number, paymentMode?: 'online' | 'cash') => {
     setBillLoading(true);
     setBillModalVisible(true);
     setSelectedBill(null);
@@ -133,6 +135,7 @@ export default function CashflowScreen() {
         bill_id: billId,
         date: new Date().toLocaleDateString(),
         total_amount: total,
+        payment_mode: paymentMode,
         items,
       });
     } catch (e) {
@@ -515,10 +518,15 @@ export default function CashflowScreen() {
                     {e.description ? (
                       <ThemedText style={styles.entryDescription}>{e.description}</ThemedText>
                     ) : null}
+                    {e.payment_mode && (
+                      <View style={[styles.modeBadge, { backgroundColor: e.payment_mode === 'online' ? '#7c6aff' : '#f59e0b' }]}>
+                        <ThemedText style={styles.modeBadgeText}>{e.payment_mode.toUpperCase()}</ThemedText>
+                      </View>
+                    )}
                     {e.bill_id ? (
                       <Pressable
                         style={styles.viewBillBtn}
-                        onPress={() => handleViewBill(e.bill_id!)}
+                        onPress={() => handleViewBill(e.bill_id!, e.payment_mode)}
                       >
                         <ThemedText style={styles.viewBillBtnText}>📄 View Bill</ThemedText>
                       </Pressable>
@@ -589,9 +597,16 @@ export default function CashflowScreen() {
         <View style={styles.modalOverlay}>
           <ThemedView style={styles.billModal}>
             <View style={styles.billModalHeader}>
-              <ThemedText type="subtitle">
-                {selectedBill ? `Bill #${selectedBill.bill_id}` : 'Bill Details'}
-              </ThemedText>
+              <View>
+                <ThemedText type="subtitle">
+                  {selectedBill ? `Bill #${selectedBill.bill_id}` : 'Bill Details'}
+                </ThemedText>
+                {selectedBill?.payment_mode && (
+                  <View style={[styles.modeBadge, { backgroundColor: selectedBill.payment_mode === 'online' ? '#7c6aff' : '#f59e0b', marginTop: 0 }]}>
+                    <ThemedText style={styles.modeBadgeText}>{selectedBill.payment_mode.toUpperCase()}</ThemedText>
+                  </View>
+                )}
+              </View>
               <Pressable onPress={() => setBillModalVisible(false)} style={styles.closeBtn}>
                 <ThemedText style={styles.closeBtnText}>✕</ThemedText>
               </Pressable>
@@ -998,5 +1013,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
-
+  modeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  modeBadgeText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '800',
+  },
 });
