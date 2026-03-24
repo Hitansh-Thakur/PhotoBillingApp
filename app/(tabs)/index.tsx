@@ -65,7 +65,7 @@ export default function HomeScreen() {
             onPress={() => router.push('/barcode-scanner' as const)}
             activeOpacity={0.8}
           >
-            <IconSymbol name="qrcode.viewfinder" size={36} color="#fff" />
+            <IconSymbol name="barcode.viewfinder" size={36} color="#fff" />
             <ThemedText style={[styles.captureButtonText, { color: '#fff' }]}>
               Scan Barcode
             </ThemedText>

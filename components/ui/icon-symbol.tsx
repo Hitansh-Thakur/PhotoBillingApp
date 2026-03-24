@@ -1,6 +1,7 @@
 // Fallback for using MaterialIcons on Android and web.
 
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { SymbolViewProps, SymbolWeight } from 'expo-symbols';
 import { ComponentProps } from 'react';
 import { OpaqueColorValue, type StyleProp, type TextStyle } from 'react-native';
@@ -22,6 +23,8 @@ const MAPPING = {
   'chart.bar.fill': 'bar-chart',
   'person.fill': 'person',
   'camera.fill': 'photo-camera',
+  'qrcode.viewfinder': 'qr-code-scanner',
+  'barcode.viewfinder': 'qr-code-scanner',
 } as IconMapping;
 
 /**
