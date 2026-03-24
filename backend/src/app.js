@@ -12,6 +12,7 @@ const cashflowRoutes = require('./routes/cashflowRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
 const detectRoutes = require('./routes/detectRoutes');
+const paymentRoutes = require('./routes/paymentRoutes'); // Razorpay integration
 
 const app = express();
 
@@ -33,6 +34,7 @@ app.use('/api/cashflow', cashflowRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/detect', detectRoutes);
+app.use('/api/payment', paymentRoutes); // Razorpay payment gateway
 
 // Multer / upload error handler
 app.use((err, req, res, next) => {
