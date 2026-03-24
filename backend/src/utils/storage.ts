@@ -23,7 +23,15 @@ export async function loadAppData(): Promise<AppData> {
   } catch (e) {
     console.warn('Failed to load app data:', e);
   }
-  return { ...INITIAL_APP_DATA };
+  return { 
+    inventory: [],
+    bills: [],
+    profile: {
+      storeName: '',
+      ownerName: '',
+      openingBalance: 0,
+    }
+  };
 }
 
 export async function saveAppData(data: AppData): Promise<void> {
@@ -79,10 +87,9 @@ export async function clearToken(): Promise<void> {
   }
 }
 
-/** Build initial AppData for a new user (mock inventory, empty bills, their profile) */
 export function createInitialAppDataForUser(user: User): AppData {
   return {
-    inventory: [...INITIAL_APP_DATA.inventory],
+    inventory: [],
     bills: [],
     profile: {
       storeName: user.businessName,

@@ -27,6 +27,7 @@ export default function InventoryScreen() {
   const [editQty, setEditQty] = useState('');
   const [editPrice, setEditPrice] = useState('');
   const [editBuyingPrice, setEditBuyingPrice] = useState('');
+  const [editBarcode, setEditBarcode] = useState('');
   const [editQtyError, setEditQtyError] = useState('');
   const [editNameError, setEditNameError] = useState('');
   const [addModalVisible, setAddModalVisible] = useState(false);
@@ -34,6 +35,7 @@ export default function InventoryScreen() {
   const [newPrice, setNewPrice] = useState('');
   const [newBuyingPrice, setNewBuyingPrice] = useState('');
   const [newQty, setNewQty] = useState('');
+  const [newBarcode, setNewBarcode] = useState('');
   const [addError, setAddError] = useState('');
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
@@ -44,6 +46,7 @@ export default function InventoryScreen() {
     setEditQty(String(p.quantity));
     setEditPrice(String(p.price));
     setEditBuyingPrice(String(p.buyingPrice ?? 0));
+    setEditBarcode(p.barcode || '');
     setEditNameError('');
     setEditQtyError('');
   };
@@ -73,9 +76,10 @@ export default function InventoryScreen() {
     const qty = qtyRaw;
     const price = Math.max(0, parseFloat(editPrice) || 0);
     const buyingPrice = Math.max(0, parseFloat(editBuyingPrice) || 0);
+    const barcode = editBarcode.trim() || undefined;
     setSaving(true);
     try {
-      await updateInventory(editingId, { name, quantity: qty, price, buyingPrice });
+      await updateInventory(editingId, { name, quantity: qty, price, buyingPrice, barcode });
       setEditingId(null);
     } catch (err: unknown) {
       const message = err && typeof err === 'object' && 'message' in err
@@ -115,13 +119,15 @@ export default function InventoryScreen() {
 
     setAddError('');
     const quantity = qtyRaw;
+    const barcode = newBarcode.trim() || undefined;
     setAdding(true);
     try {
-      await addProduct({ name, price, buyingPrice, quantity });
+      await addProduct({ name, price, buyingPrice, quantity, barcode });
       setNewName('');
       setNewPrice('');
       setNewBuyingPrice('');
       setNewQty('');
+      setNewBarcode('');
       setAddModalVisible(false);
     } catch (err: unknown) {
       const message = err && typeof err === 'object' && 'message' in err
@@ -216,6 +222,16 @@ export default function InventoryScreen() {
                       keyboardType="decimal-pad"
                     />
                   </View>
+                  <View style={styles.inputGroup}>
+                    <ThemedText style={styles.label}>Barcode</ThemedText>
+                    <TextInput
+                      style={[styles.input, { color: colors.text }]}
+                      value={editBarcode}
+                      onChangeText={setEditBarcode}
+                      placeholder="Optional"
+                      placeholderTextColor={colors.icon}
+                    />
+                  </View>
                 </View>
                 <View style={styles.editActions}>
                   <TouchableOpacity onPress={() => setEditingId(null)} disabled={saving}>
@@ -236,6 +252,11 @@ export default function InventoryScreen() {
                 <ThemedText style={styles.meta}>
                   Qty: {p.quantity} • Selling: ₹{p.price.toFixed(2)} • Buying: ₹{(p.buyingPrice ?? 0).toFixed(2)}
                 </ThemedText>
+                {p.barcode ? (
+                  <ThemedText style={styles.meta}>
+                    Barcode: {p.barcode}
+                  </ThemedText>
+                ) : null}
                 <ThemedText style={styles.value}>
                   Value: ₹{(p.quantity * p.price).toFixed(2)}
                 </ThemedText>
@@ -302,6 +323,14 @@ export default function InventoryScreen() {
               placeholder="Enter quantity > 0"
               placeholderTextColor={colors.icon}
               keyboardType="numeric"
+            />
+            <ThemedText style={styles.label}>Barcode (Optional)</ThemedText>
+            <TextInput
+              style={[styles.input, styles.modalInput, { color: colors.text }]}
+              value={newBarcode}
+              onChangeText={setNewBarcode}
+              placeholder="Scan or enter barcode"
+              placeholderTextColor={colors.icon}
             />
             {newBuyingPrice && newQty ? (
               <ThemedText style={styles.expenseHint}>
